@@ -28,7 +28,7 @@ class NodeFlags(object):
     Default = 0
     Directory = 0x1
     Deleted = 0x2
-    SerializedFile = 0x4;
+    SerializedFile = 0x4
 
 class UnitySignature(object):
     UnityFS = 'UnityFS'
@@ -185,35 +185,47 @@ class UnityAssetBundle(object):
             compressed_data = fs.read(self.header.compressed_blocks_info_size)
             assert len(compressed_data) == self.header.compressed_blocks_info_size
             uncompressed_data = lz4.block.decompress(compressed_data, self.header.uncompressed_blocks_info_size)
-            fs = FileStream(data=uncompressed_data)
-            self.read_blocks_and_nodes(fs)
+            temp = FileStream(data=uncompressed_data)
+            self.read_blocks_and_directory(temp)
         else:
             assert self.header.compressed_blocks_info_size == self.header.uncompressed_blocks_info_size
-            self.read_blocks_and_nodes(fs)
+            self.read_blocks_and_directory(fs)
+        import io
+        buf = io.BytesIO()
+        for block in self.blocks_info.blocks:
+            if block.compression_type != CompressionType.NONE:
+                compressed_data = fs.read(block.compressed_size)
+                uncompressed_data = lz4.block.decompress(compressed_data, block.uncompressed_size)
+                assert len(uncompressed_data) == block.uncompressed_size, uncompressed_data
+                buf.write(uncompressed_data)
+            else:
+                uncompressed_data = fs.read(block.uncompressed_size)
+                buf.write(uncompressed_data)
+        assert fs.position == fs.length
 
-    def read_blocks_and_nodes(self, fs: FileStream):
+    def read_blocks_and_directory(self, fs: FileStream):
         self.blocks_info.decode(fs)
         print(self.blocks_info.uncompressed_data_hash)
         print(self.blocks_info.blocks)
         if self.header.has_blocks_and_directory_info_combined:
             self.direcory_info.decode(fs)
-            print(self.direcory_info.nodes)
+            print(vars(self.direcory_info))
         self.data_offset = fs.position
-
-        worst_compression_ratio = 0.0
+        worst_compression_ratio = 1.0
         self.uncompressed_blocks_offsets = [0]
         self.blocks_offsets = [0]
         for i in range(len(self.blocks_info.blocks)):
             block = self.blocks_info.blocks[i]
             self.uncompressed_blocks_offsets.append(0)
+            self.blocks_offsets.append(0)
             self.uncompressed_blocks_offsets[i + 1] = self.uncompressed_blocks_offsets[i] + block.uncompressed_size
             self.blocks_offsets[i + 1] = self.blocks_offsets[i] + block.compressed_size
             if not block.is_streamed and self.minimum_read_buffer_size < block.compressed_size:
                 self.minimum_read_buffer_size = block.compressed_size
-
             ratio = 1.0 * block.compressed_size / block.uncompressed_size
             if worst_compression_ratio > ratio: worst_compression_ratio = ratio
         self.minimum_read_buffer_size = int(self.minimum_read_buffer_size / worst_compression_ratio)
+        print(self.minimum_read_buffer_size, worst_compression_ratio)
 
 if __name__ == '__main__':
     arguments = argparse.ArgumentParser()

@@ -163,7 +163,7 @@ class ArchiveStorageHeader(object):
         self.header_size = fs.position - offset
 
 
-class UnityAssetBundle(object):
+class UnityArchiveFile(object):
     def __init__(self):
         self.header = ArchiveStorageHeader()
         self.blocks_info: BlocksInfo = BlocksInfo()
@@ -198,6 +198,7 @@ class UnityAssetBundle(object):
                 uncompressed_data = lz4.block.decompress(compressed_data, block.uncompressed_size)
                 assert len(uncompressed_data) == block.uncompressed_size, uncompressed_data
                 buf.write(uncompressed_data)
+                # print('++', uncompressed_data)
             else:
                 uncompressed_data = fs.read(block.uncompressed_size)
                 buf.write(uncompressed_data)
@@ -206,7 +207,7 @@ class UnityAssetBundle(object):
     def read_blocks_and_directory(self, fs: FileStream):
         self.blocks_info.decode(fs)
         print(self.blocks_info.uncompressed_data_hash)
-        print(self.blocks_info.blocks)
+        print(len(self.blocks_info.blocks),vars(self.blocks_info))
         if self.header.has_blocks_and_directory_info_combined:
             self.direcory_info.decode(fs)
             print(vars(self.direcory_info))
@@ -231,5 +232,5 @@ if __name__ == '__main__':
     arguments = argparse.ArgumentParser()
     arguments.add_argument('--file', '-f', required=True)
     options = arguments.parse_args(sys.argv[1:])
-    ab = UnityAssetBundle()
+    ab = UnityArchiveFile()
     ab.read(file_path=options.file)

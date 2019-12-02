@@ -1,6 +1,7 @@
 from stream import FileStream
 from typing import List, Dict
 from strings import get_caculate_string
+import io
 
 MONO_BEHAVIOUR_PERSISTENT_ID = 114
 
@@ -19,12 +20,11 @@ class MetadataType(object):
         self.script_type_index: int = -1
         self.script_type_hash: bytes = b''
         self.type_hash: bytes = b''
-        self.nodes: List[TypeTreeNode] = []
+        self.nodes: List[MetadataTypeField] = []
         self.strings: Dict[int, str] = {}
         self.type_tree_enabled: bool = type_tree_enabled
 
     def decode(self, fs: FileStream):
-
         self.persistent_type_id = fs.read_sint32()
         self.is_stripped_type = fs.read_boolean()
         self.script_type_index = fs.read_sint16()
@@ -38,7 +38,7 @@ class MetadataType(object):
             node_count = fs.read_uint32()
             char_count = fs.read_uint32()
             for _ in range(node_count):
-                node = TypeTreeNode()
+                node = MetadataTypeField()
                 node.decode(fs)
                 if type_index >= 0: assert node.index == type_index + 1
                 self.nodes.append(node)
@@ -52,12 +52,21 @@ class MetadataType(object):
                     self.strings[offset] = fs.read_string()
                     string_size += fs.position - position
                 assert fs.position - string_offset == char_count
-            for node in self.nodes:  # type: TypeTreeNode
+            for node in self.nodes:  # type: MetadataTypeField
                 node.name = get_caculate_string(offset=node.name_str_offset, strings=self.strings)
                 node.type = get_caculate_string(offset=node.type_str_offset, strings=self.strings)
                 print(vars(node))
 
-class TypeTreeNode(object):
+    def __repr__(self):
+        buf = io.StringIO()
+        buf.write('[MetadataType] persistent_type_id={} is_stripped_type={} script_type_index={} type_hash={}\n'.format(self.persistent_type_id, self.is_stripped_type, self.script_type_index, self.type_hash))
+        for node in self.nodes:
+            buf.write(node.level * '    ')
+            buf.write('{}:\'{}\' {}\n'.format(node.name, node.type, node.byte_size))
+        buf.seek(0)
+        return buf.read()
+
+class MetadataTypeField(object):
     def __init__(self):
         self.version: int = 0  # sint16
         self.level: int = 0  # uint8
@@ -124,6 +133,7 @@ class SerializeFile(object):
         self.metadata_types: List[MetadataType] = []
         self.objects: List[ObjectInfo] = []
         self.script_types: List[ScriptTypeInfo] = []
+        self.externals: List[ExternalInfo] = []
 
     def read(self, fs:FileStream):
         header = self.header
@@ -145,7 +155,7 @@ class SerializeFile(object):
             meta_type = MetadataType(type_tree_enabled=self.type_tree_enabled)
             meta_type.decode(fs)
             self.metadata_types.append(meta_type)
-            print(vars(meta_type))
+            print(meta_type)
         object_count = fs.read_sint32()
         print('object', object_count)
         for _ in range(object_count):
@@ -168,7 +178,11 @@ class SerializeFile(object):
         for _ in range(external_count):
             ext = ExternalInfo()
             ext.decode(fs)
+            self.externals.append(ext)
             print(vars(ext))
+
+        fs.read_string()
+        print(fs.position)
 
 
 

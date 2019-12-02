@@ -191,18 +191,23 @@ class UnityArchiveFile(object):
             assert self.header.compressed_blocks_info_size == self.header.uncompressed_blocks_info_size
             self.read_blocks_and_directory(fs)
         import io
-        buf = io.BytesIO()
+        buffer = io.BytesIO()
         for block in self.blocks_info.blocks:
             if block.compression_type != CompressionType.NONE:
                 compressed_data = fs.read(block.compressed_size)
                 uncompressed_data = lz4.block.decompress(compressed_data, block.uncompressed_size)
                 assert len(uncompressed_data) == block.uncompressed_size, uncompressed_data
-                buf.write(uncompressed_data)
-                # print('++', uncompressed_data)
+                buffer.write(uncompressed_data)
+                # print(uncompressed_data)
             else:
                 uncompressed_data = fs.read(block.uncompressed_size)
-                buf.write(uncompressed_data)
+                buffer.write(uncompressed_data)
         assert fs.position == fs.length
+        buffer.seek(0)
+        with open('data.bin', 'wb') as fp:
+            fp.write(buffer.read())
+            buffer.seek(0)
+        return FileStream(data=buffer.read())
 
     def read_blocks_and_directory(self, fs: FileStream):
         self.blocks_info.decode(fs)
@@ -233,4 +238,7 @@ if __name__ == '__main__':
     arguments.add_argument('--file', '-f', required=True)
     options = arguments.parse_args(sys.argv[1:])
     ab = UnityArchiveFile()
-    ab.read(file_path=options.file)
+    fs = ab.read(file_path=options.file)
+    from serialize import SerializeFile
+    serializer = SerializeFile()
+    serializer.read(fs)

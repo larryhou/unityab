@@ -164,7 +164,8 @@ class ArchiveStorageHeader(object):
 
 
 class UnityArchiveFile(object):
-    def __init__(self):
+    def __init__(self, debug:bool = True):
+        self.debug = debug
         self.header = ArchiveStorageHeader()
         self.blocks_info: BlocksInfo = BlocksInfo()
         self.direcory_info: DirectoryInfo = DirectoryInfo()
@@ -173,11 +174,14 @@ class UnityArchiveFile(object):
         self.blocks_offsets: List[int] = []
         self.minimum_read_buffer_size: int = 0
 
+    def print(self, *args):
+        if self.debug: print(*args)
+
     def decode(self, file_path: str):
         fs = FileStream()
         fs.open(file_path)
         self.header.decode(fs)
-        print(vars(self.header))
+        self.print(vars(self.header))
         blocks_info_offset = self.header.get_blocks_info_offset()
         fs.seek(blocks_info_offset)
         compression_type = self.header.compression_type
@@ -211,11 +215,11 @@ class UnityArchiveFile(object):
 
     def read_blocks_and_directory(self, fs: FileStream):
         self.blocks_info.decode(fs)
-        print(self.blocks_info.uncompressed_data_hash)
-        print(len(self.blocks_info.blocks),vars(self.blocks_info))
+        self.print(self.blocks_info.uncompressed_data_hash)
+        self.print(len(self.blocks_info.blocks),vars(self.blocks_info))
         if self.header.has_blocks_and_directory_info_combined:
             self.direcory_info.decode(fs)
-            print(vars(self.direcory_info))
+            self.print(vars(self.direcory_info))
         self.data_offset = fs.position
         worst_compression_ratio = 1.0
         self.uncompressed_blocks_offsets = [0]
@@ -231,21 +235,22 @@ class UnityArchiveFile(object):
             ratio = 1.0 * block.compressed_size / block.uncompressed_size
             if worst_compression_ratio > ratio: worst_compression_ratio = ratio
         self.minimum_read_buffer_size = int(self.minimum_read_buffer_size / worst_compression_ratio)
-        print(self.minimum_read_buffer_size, worst_compression_ratio)
+        self.print(self.minimum_read_buffer_size, worst_compression_ratio)
 
 def main():
     arguments = argparse.ArgumentParser()
     arguments.add_argument('--file', '-f', nargs='+', required=True)
+    arguments.add_argument('--debug', '-d', action='store_true')
     options = arguments.parse_args(sys.argv[1:])
     from serialize import SerializeFile
     for file_path in options.file:
         print('>>>', file_path)
-        ab = UnityArchiveFile()
+        ab = UnityArchiveFile(debug=options.debug)
         try:
             fs = ab.decode(file_path=file_path)
         except:
             fs = FileStream(file_path=file_path)
-        serializer = SerializeFile()
+        serializer = SerializeFile(debug=options.debug)
         serializer.decode(fs)
         serializer.dump(fs)
 

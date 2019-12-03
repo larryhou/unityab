@@ -36,7 +36,6 @@ class MetadataTypeTree(object):
         type_index = -1
         node_count = fs.read_uint32()
         char_count = fs.read_uint32()
-        print(node_count, char_count)
         for _ in range(node_count):
             node = TypeField()
             node.decode(fs)
@@ -158,7 +157,8 @@ class ExternalInfo(object):
         return '{{guid=\'{}\', type={}, path=\'{}\'}}'.format(uuid.UUID(bytes=self.guid), self.type, self.path)
 
 class SerializeFile(object):
-    def __init__(self, offset:int = 0):
+    def __init__(self, offset:int = 0, debug:bool = True):
+        self.debug: bool = debug
         self.offset: int = offset
         self.header: SerializeFileHeader = SerializeFileHeader()
         self.version: str = ''
@@ -189,6 +189,9 @@ class SerializeFile(object):
             'double': FileStream.read_double,
             'Type*': FileStream.read_uint32,
         }
+
+    def print(self, *args):
+        if self.debug: print(*args)
 
     @staticmethod
     def register_type_tree(type_tree: MetadataTypeTree):
@@ -262,35 +265,36 @@ class SerializeFile(object):
         for o in self.objects:
             fs.seek(self.offset + self.header.data_offset + o.byte_start)
             type_tree = self.metadata_types[o.type_id]
+            if not type_tree.type_dict: continue
             try:
-                print(vars(type_tree.type_dict.get(0)))
+                self.print(vars(type_tree.type_dict.get(0)))
             except: continue
             offset = fs.position
             data = self.deserialize(fs=fs, meta_type=type_tree.type_dict.get(0))
             assert fs.position - offset == o.byte_size
-            print(data)
-            print()
-        print(fs.position, fs.bytes_available)
+            self.print(data)
+            self.print()
+        self.print('position={} remain={}'.format(fs.position, fs.bytes_available))
 
     def decode(self, fs:FileStream):
         fs.seek(self.offset)
         header = self.header
         header.metadata_size = fs.read_sint32()
         header.file_size = fs.read_sint32()
-        assert fs.length == header.file_size
+        # assert fs.length == header.file_size, '{} != {}'.format(fs.length, header.file_size)
         header.version = fs.read_sint32()
         header.data_offset = fs.read_sint32()
         header.endianess = fs.read_boolean()
         fs.read(3)  # reserved bytes
         fs.endian = '>' if header.endianess else '<'
-        print(vars(header))
+        self.print(vars(header))
         self.version = fs.read_string()
         self.platform = fs.read_uint32()
         self.type_tree_enabled = fs.read_boolean()
-        print(self.version, self.platform, self.type_tree_enabled)
+        self.print(self.version, self.platform, self.type_tree_enabled)
         self.metadata_types = []
         type_count = fs.read_uint32()
-        print('type', type_count)
+        self.print('type', type_count)
         for _ in range(type_count):
             offset = fs.position
             type_tree = MetadataTypeTree(type_tree_enabled=self.type_tree_enabled)
@@ -303,32 +307,32 @@ class SerializeFile(object):
                     fp.write(type_data)
             self.metadata_types.append(type_tree)
             self.register_type_tree(type_tree=type_tree)
-            print(type_tree)
+            self.print(type_tree)
 
         object_count = fs.read_sint32()
-        print('object', object_count)
+        self.print('object', object_count)
         for _ in range(object_count):
             fs.align(4)
             obj = ObjectInfo()
             obj.decode(fs)
             self.objects.append(obj)
-            print(vars(obj))
+            self.print(vars(obj))
 
         script_type_count = fs.read_sint32()
-        print('typeinfo', script_type_count)
+        self.print('typeinfo', script_type_count)
         for _ in range(script_type_count):
             st = ScriptTypeInfo()
             st.decode(fs)
             self.typeinfos.append(st)
-            print(vars(st))
+            self.print(vars(st))
 
         external_count = fs.read_sint32()
-        print('external', external_count)
+        self.print('external', external_count)
         for _ in range(external_count):
             ext = ExternalInfo()
             ext.decode(fs)
             self.externals.append(ext)
-            print(ext)
+            self.print(ext)
 
         fs.read_string()
 

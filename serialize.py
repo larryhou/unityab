@@ -277,6 +277,7 @@ class SerializeFile(object):
         header = self.header
         header.metadata_size = fs.read_sint32()
         header.file_size = fs.read_sint32()
+        assert fs.length == header.file_size
         header.version = fs.read_sint32()
         header.data_offset = fs.read_sint32()
         header.endianess = fs.read_boolean()

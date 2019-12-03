@@ -161,10 +161,10 @@ class FileStream(object):
     def read_boolean(self) -> bool:
         return struct.unpack('?', self.__buffer.read(1))[0]
 
-    def read_sbyte(self) -> int:
+    def read_sint8(self) -> int:
         return struct.unpack('b', self.__buffer.read(1))[0]
 
-    def read_ubyte(self) -> int:
+    def read_uint8(self) -> int:
         return self.read(1)[0]
 
     def read_short(self) -> int:
@@ -206,18 +206,18 @@ class FileStream(object):
         return struct.unpack('>i', data)[0]
 
     def read_sqlit_uint32(self) -> int:
-        byte0 = self.read_ubyte()
+        byte0 = self.read_uint8()
         if byte0 < 241: return byte0
-        byte1 = self.read_ubyte()
+        byte1 = self.read_uint8()
         if byte0 < 249:
             return 240 + 256 * (byte0 - 241) + byte1
-        byte2 = self.read_ubyte()
+        byte2 = self.read_uint8()
         if byte0 == 249:
             return 2288 + 256 * byte1 + byte2
-        byte3 = self.read_ubyte()
+        byte3 = self.read_uint8()
         if byte0 == 250:
             return byte1 << 0 | byte2 << 8 | byte3 << 16
-        byte4 = self.read_ubyte()
+        byte4 = self.read_uint8()
         if byte0 >= 251:
             return byte1 << 0 | byte2 << 8 | byte3 << 16 | byte4 << 24
 
@@ -228,7 +228,7 @@ class FileStream(object):
     def read_compact_uint32(self) -> int:
         value, shift = 0, 0
         while True:
-            byte = self.read_ubyte()
+            byte = self.read_uint8()
             value |= (byte & 0x7F) << shift
             if byte & 0x80 == 0: break
             shift += 7

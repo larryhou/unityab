@@ -241,4 +241,5 @@ if __name__ == '__main__':
     fs = ab.read(file_path=options.file)
     from serialize import SerializeFile
     serializer = SerializeFile()
-    serializer.read(fs)
+    serializer.decode(fs)
+    serializer.dump(fs)

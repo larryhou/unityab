@@ -1,7 +1,7 @@
 from stream import FileStream
 from typing import List, Dict
 from strings import get_caculate_string
-import io
+import io, uuid
 
 MONO_BEHAVIOUR_PERSISTENT_ID = 114
 
@@ -14,15 +14,23 @@ class SerializeFileHeader(object):
         self.endianess: int = 0
 
 class MetadataType(object):
+    def __init__(self, name:str, index:int, fields: List['TypeField'], type_tree: 'MetadataTypeTree'):
+        self.fields: List[TypeField] = fields
+        self.name: str = name
+        self.index: int = index
+        self.type_tree: MetadataTypeTree = type_tree
+
+class MetadataTypeTree(object):
     def __init__(self, type_tree_enabled: bool):
         self.persistent_type_id: int = -1
         self.is_stripped_type: bool = False
         self.script_type_index: int = -1
         self.script_type_hash: bytes = b''
         self.type_hash: bytes = b''
-        self.nodes: List[MetadataTypeField] = []
+        self.nodes: List[TypeField] = []
         self.strings: Dict[int, str] = {}
         self.type_tree_enabled: bool = type_tree_enabled
+        self.type_dict: Dict[int, MetadataType] = {}
 
     def decode(self, fs: FileStream):
         self.persistent_type_id = fs.read_sint32()
@@ -38,7 +46,7 @@ class MetadataType(object):
             node_count = fs.read_uint32()
             char_count = fs.read_uint32()
             for _ in range(node_count):
-                node = MetadataTypeField()
+                node = TypeField()
                 node.decode(fs)
                 if type_index >= 0: assert node.index == type_index + 1
                 self.nodes.append(node)
@@ -52,21 +60,25 @@ class MetadataType(object):
                     self.strings[offset] = fs.read_string()
                     string_size += fs.position - position
                 assert fs.position - string_offset == char_count
-            for node in self.nodes:  # type: MetadataTypeField
+            for node in self.nodes:  # type: TypeField
                 node.name = get_caculate_string(offset=node.name_str_offset, strings=self.strings)
                 node.type = get_caculate_string(offset=node.type_str_offset, strings=self.strings)
-                print(vars(node))
+                # print(vars(node))
 
     def __repr__(self):
         buf = io.StringIO()
-        buf.write('[MetadataType] persistent_type_id={} is_stripped_type={} script_type_index={} type_hash={}\n'.format(self.persistent_type_id, self.is_stripped_type, self.script_type_index, self.type_hash))
+        buf.write('[MetadataTypeTree] persistent_type_id={} is_stripped_type={} script_type_index={} type_hash={}'.format(self.persistent_type_id, self.is_stripped_type, self.script_type_index, uuid.UUID(bytes=self.type_hash)))
+        if self.persistent_type_id == MONO_BEHAVIOUR_PERSISTENT_ID: buf.write(' mono_hash={}'.format(uuid.UUID(bytes=self.script_type_hash)))
+        buf.write('\n')
         for node in self.nodes:
             buf.write(node.level * '    ')
-            buf.write('{}:\'{}\' {}\n'.format(node.name, node.type, node.byte_size))
+            buf.write('{}:\'{}\''.format(node.name, node.type))
+            if node.is_array: buf.write('[]')
+            buf.write(' {} {}\n'.format(node.byte_size, node.index))
         buf.seek(0)
         return buf.read()
 
-class MetadataTypeField(object):
+class TypeField(object):
     def __init__(self):
         self.version: int = 0  # sint16
         self.level: int = 0  # uint8
@@ -81,13 +93,16 @@ class MetadataTypeField(object):
 
     def decode(self, fs: FileStream):
         self.version = fs.read_sint16()
-        self.level = fs.read_ubyte()
+        self.level = fs.read_uint8()
         self.is_array = fs.read_boolean()
         self.type_str_offset = fs.read_uint32()
         self.name_str_offset = fs.read_uint32()
         self.byte_size = fs.read_sint32()
         self.index = fs.read_sint32()
         self.meta_flag = fs.read_uint32()
+
+    def __repr__(self):
+        return '{{{}:\'{}\'}}'.format(self.name, self.type)
 
 class ObjectInfo(object):
     def __init__(self):
@@ -124,18 +139,112 @@ class ExternalInfo(object):
         self.type = fs.read_sint32()
         self.path = fs.read_string()
 
+    def __repr__(self):
+        return '{{guid=\'{}\', type={}, path=\'{}\'}}'.format(uuid.UUID(bytes=self.guid), self.type, self.path)
+
 class SerializeFile(object):
     def __init__(self):
         self.header: SerializeFileHeader = SerializeFileHeader()
         self.version: str = ''
         self.platform: int = 0
         self.type_tree_enabled: bool = False
-        self.metadata_types: List[MetadataType] = []
+        self.metadata_types: List[MetadataTypeTree] = []
         self.objects: List[ObjectInfo] = []
-        self.script_types: List[ScriptTypeInfo] = []
+        self.typeinfos: List[ScriptTypeInfo] = []
         self.externals: List[ExternalInfo] = []
+        self.__premitive_decoders = {
+            'bool': FileStream.read_boolean,
+            'SInt8': FileStream.read_sint8,
+            'UInt8': FileStream.read_uint8,
+            'char': FileStream.read_uint8,
+            'SInt16': FileStream.read_sint16,
+            'UInt16': FileStream.read_uint16,
+            'short': FileStream.read_short,
+            'unsigned short': FileStream.read_uint16,
+            'SInt32': FileStream.read_sint32,
+            'UInt32': FileStream.read_uint32,
+            'int': FileStream.read_sint32,
+            'unsigned int': FileStream.read_uint32,
+            'SInt64': FileStream.read_sint64,
+            'UInt64': FileStream.read_uint64,
+            'float': FileStream.read_float,
+            'long': FileStream.read_sint64,
+        }
 
-    def read(self, fs:FileStream):
+    @staticmethod
+    def register_type_tree(type_tree: MetadataTypeTree):
+        walker = []
+        cursor = None
+        for node in type_tree.nodes:
+            if not cursor: pass
+            else:
+                if cursor.level == node.level:
+                    _, fields = walker[-1]
+                    fields.append(node)
+                elif cursor.level < node.level:
+                    walker.append((cursor, [node]))
+                elif cursor.level > node.level:
+                    for _ in range(cursor.level - node.level):
+                        t, fields = walker.pop()
+                        meta_type = MetadataType(name=t.type, index=t.index, fields=fields, type_tree=type_tree)
+                        type_tree.type_dict[meta_type.index] = meta_type
+                    _, fields = walker[-1]
+                    fields.append(node)
+            cursor = node
+        while walker:
+            t, fields = walker.pop()
+            meta_type = MetadataType(name=t.type, index=t.index, fields=fields, type_tree=type_tree)
+            type_tree.type_dict[meta_type.index] = meta_type
+
+    def deserialize(self, fs: FileStream, meta_type: MetadataType):
+        result = {}
+        type_map = meta_type.type_tree.type_dict
+        for n in range(len(meta_type.fields)):
+            node = meta_type.fields[n]
+            if node.is_array:
+                element_type = meta_type.type_tree.nodes[node.index + 2]
+                element_count = fs.read_sint32()
+                if element_type.byte_size == 1:
+                    result[node.name] = fs.read(element_count) if element_count > 0 else b''
+                    fs.align()
+                else:
+                    items = []
+                    if element_type.type in self.__premitive_decoders:
+                        decode = self.__premitive_decoders.get(element_type.type)
+                        for _ in range(element_count):
+                            items.append(decode(fs))
+                    elif element_type.type == 'string':
+                        for _ in range(element_count):
+                            size = fs.read_sint32()
+                            items.append(fs.read(size) if size > 0 else b'')
+                            fs.align()
+                    else:
+                        for m in range(element_count):
+                            it = self.deserialize(fs, meta_type=type_map.get(element_type.index))
+                            items.append(it)
+                    result[node.name] = items
+                    fs.align()
+            elif node.type == 'string':
+                size = fs.read_sint32()
+                result[node.name] = fs.read(size) if size > 0 else b''
+                fs.align()
+            elif node.type in self.__premitive_decoders:
+                result[node.name] = self.__premitive_decoders.get(node.type)(fs)
+                if node.meta_flag & 0x4000 != 0: fs.align()
+            else:
+                result[node.name] = self.deserialize(fs, meta_type=type_map.get(node.index))
+        return result
+
+    def dump(self, fs: FileStream):
+        for o in self.objects:
+            fs.seek(self.header.data_offset + o.byte_start)
+            type_tree = self.metadata_types[o.type_id]
+            print(fs.position, vars(type_tree.type_dict.get(0)))
+            data = self.deserialize(fs=fs, meta_type=type_tree.type_dict.get(0))
+            print(data)
+            print()
+
+    def decode(self, fs:FileStream):
         header = self.header
         header.metadata_size = fs.read_sint32()
         header.file_size = fs.read_sint32()
@@ -151,11 +260,14 @@ class SerializeFile(object):
         print(self.version, self.platform, self.type_tree_enabled)
         self.metadata_types = []
         type_count = fs.read_uint32()
+        print('type', type_count)
         for _ in range(type_count):
-            meta_type = MetadataType(type_tree_enabled=self.type_tree_enabled)
-            meta_type.decode(fs)
-            self.metadata_types.append(meta_type)
-            print(meta_type)
+            type_tree = MetadataTypeTree(type_tree_enabled=self.type_tree_enabled)
+            type_tree.decode(fs)
+            self.metadata_types.append(type_tree)
+            self.register_type_tree(type_tree=type_tree)
+            print(type_tree)
+
         object_count = fs.read_sint32()
         print('object', object_count)
         for _ in range(object_count):
@@ -166,11 +278,11 @@ class SerializeFile(object):
             print(vars(obj))
 
         script_type_count = fs.read_sint32()
-        print('script_type', script_type_count)
+        print('typeinfo', script_type_count)
         for _ in range(script_type_count):
             st = ScriptTypeInfo()
             st.decode(fs)
-            self.script_types.append(st)
+            self.typeinfos.append(st)
             print(vars(st))
 
         external_count = fs.read_sint32()
@@ -179,7 +291,7 @@ class SerializeFile(object):
             ext = ExternalInfo()
             ext.decode(fs)
             self.externals.append(ext)
-            print(vars(ext))
+            print(ext)
 
         fs.read_string()
         print(fs.position)

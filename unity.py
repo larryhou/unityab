@@ -235,18 +235,19 @@ class UnityArchiveFile(object):
 
 def main():
     arguments = argparse.ArgumentParser()
-    arguments.add_argument('--file', '-f', required=True)
+    arguments.add_argument('--file', '-f', nargs='+', required=True)
     options = arguments.parse_args(sys.argv[1:])
-    ab = UnityArchiveFile()
-    try:
-        fs = ab.decode(file_path=options.file)
-    except:
-        fs = FileStream(file_path=options.file)
-
     from serialize import SerializeFile
-    serializer = SerializeFile()
-    serializer.decode(fs)
-    serializer.dump(fs)
+    for file_path in options.file:
+        print('>>>', file_path)
+        ab = UnityArchiveFile()
+        try:
+            fs = ab.decode(file_path=file_path)
+        except:
+            fs = FileStream(file_path=file_path)
+        serializer = SerializeFile()
+        serializer.decode(fs)
+        serializer.dump(fs)
 
 
 if __name__ == '__main__':

@@ -70,11 +70,10 @@ class MetadataTypeTree(object):
             self.__decode_type_tree(fs)
         else:
             import os.path as p
-            type_path = p.join(p.dirname(p.abspath(__file__)), 'types')
-            file_path = '{}/{}_{}.type'.format(type_path, self.persistent_type_id, self.type_hash.hex())
-            print(file_path)
-            if p.exists(file_path):
-                tmp = FileStream(file_path=file_path)
+            type_data_path = p.join(p.dirname(p.abspath(__file__)), 'types')
+            type_data_file = '{}/{}_{}.type'.format(type_data_path, self.persistent_type_id, self.type_hash.hex())
+            if p.exists(type_data_file):
+                tmp = FileStream(file_path=type_data_file)
                 tmp.endian = '<'
                 persistent_type_id = tmp.read_sint32()
                 assert persistent_type_id == self.persistent_type_id, '{} != {}'.format(persistent_type_id, self.persistent_type_id)
@@ -188,6 +187,7 @@ class SerializeFile(object):
             'unsigned long': FileStream.read_uint64,
             'float': FileStream.read_float,
             'double': FileStream.read_double,
+            'Type*': FileStream.read_uint32,
         }
 
     @staticmethod
@@ -252,7 +252,9 @@ class SerializeFile(object):
             elif node.type in self.__premitive_decoders:
                 result[node.name] = self.__premitive_decoders.get(node.type)(fs)
                 if node.meta_flags & 0x4000 != 0: fs.align()
+            elif node.byte_size == 0: continue
             else:
+                # print('-', vars(node))
                 result[node.name] = self.deserialize(fs, meta_type=type_map.get(node.index))
         return result
 

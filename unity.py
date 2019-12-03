@@ -6,6 +6,7 @@ import sys
 
 import lz4.block
 
+from format import TextureFormat
 from stream import FileStream
 from typing import List
 
@@ -304,20 +305,31 @@ def main():
                 if type_tree.persistent_type_id in options.types:
                     fs.seek(serializer.header.data_offset + o.byte_start)
                     target = serializer.deserialize(fs, meta_type=type_tree.type_dict.get(0))
-                    print(target)
                     data = b''
                     name = target['m_Name']  # type: bytes
                     extension = 'bin'
                     if type_tree.name == 'Texture2D':
+                        target['m_TextureFormat'] = TextureFormat(target['m_TextureFormat'])
+                        print(target)
                         data = target['image data'].get('data', b'')
+                        if not data:
+                            stream_data = target.get('m_StreamData')  # type: dict
+                            offset = stream_data.get('offset')
+                            size = stream_data.get('size')
+                            node = ab.direcory_info.nodes[1]
+                            fs.seek(node.offset + offset)
+                            data = fs.read(size)
                         extension = 'tex'
                     elif type_tree.name == 'TextAsset':
+                        print(target)
                         data = target.get('m_Script')
                         extension = 'bytes'
                     elif type_tree.name == 'Sprite':
+                        print(target)
                         simplify(target)
                         data = json.dumps(target, ensure_ascii=False, indent=4).encode('utf-8')
                         extension = 'json'
+                    else: print(target)
                     with open('{}/{}.{}'.format(output_path, name.decode('utf-8'), extension), 'wb') as fp:
                         fp.write(data)
                         print('  + {}'.format(fp.name))

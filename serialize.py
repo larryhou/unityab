@@ -32,6 +32,7 @@ class MetadataTypeTree(object):
         self.strings: Dict[int, str] = {}
         self.type_tree_enabled: bool = type_tree_enabled
         self.type_dict: Dict[int, MetadataType] = {}
+        self.name: str = ''
 
     def __decode_type_tree(self, fs: FileStream):
         type_index = -1
@@ -55,6 +56,7 @@ class MetadataTypeTree(object):
         for node in self.nodes:  # type: TypeField
             node.name = get_caculate_string(offset=node.name_str_offset, strings=self.strings)
             node.type = get_caculate_string(offset=node.type_str_offset, strings=self.strings)
+        self.name = self.nodes[0].type
 
     def decode(self, fs: FileStream):
         offset = fs.position
@@ -165,7 +167,7 @@ class SerializeFile(object):
         self.version: str = ''
         self.platform: int = 0
         self.type_tree_enabled: bool = False
-        self.metadata_types: List[MetadataTypeTree] = []
+        self.type_trees: List[MetadataTypeTree] = []
         self.objects: List[ObjectInfo] = []
         self.typeinfos: List[ScriptTypeInfo] = []
         self.externals: List[ExternalInfo] = []
@@ -265,7 +267,7 @@ class SerializeFile(object):
     def dump(self, fs: FileStream):
         for o in self.objects:
             fs.seek(self.node.offset + self.header.data_offset + o.byte_start)
-            type_tree = self.metadata_types[o.type_id]
+            type_tree = self.type_trees[o.type_id]
             if not type_tree.type_dict: continue
             try:
                 self.print(vars(type_tree.type_dict.get(0)))
@@ -293,7 +295,7 @@ class SerializeFile(object):
         self.platform = fs.read_uint32()
         self.type_tree_enabled = fs.read_boolean()
         self.print(self.version, self.platform, self.type_tree_enabled)
-        self.metadata_types = []
+        self.type_trees = []
         type_count = fs.read_uint32()
         self.print('type', type_count)
         for _ in range(type_count):
@@ -306,7 +308,7 @@ class SerializeFile(object):
                 type_data = fs.read(position - offset)
                 with open('types/{}_{}.type'.format(type_tree.persistent_type_id, type_tree.type_hash.hex()), 'wb') as fp:
                     fp.write(type_data)
-            self.metadata_types.append(type_tree)
+            self.type_trees.append(type_tree)
             self.register_type_tree(type_tree=type_tree)
             self.print(type_tree)
 

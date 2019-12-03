@@ -237,12 +237,45 @@ class UnityArchiveFile(object):
         self.minimum_read_buffer_size = int(self.minimum_read_buffer_size / worst_compression_ratio)
         self.print(self.minimum_read_buffer_size, worst_compression_ratio)
 
+class Commands(object):
+    dump = 'dump'
+    save = 'save'
+    type = 'type'
+
+    @classmethod
+    def get_option_choices(cls):
+        choices = []
+        for name, value in vars(Commands).items():
+            if name == value: choices.append(name)
+        return choices
+
+def simplify(data):
+    if isinstance(data, dict):
+        for key, value in data.items():  # type: str, any
+            if isinstance(value, bytes):
+                data[key] = value.hex() if key == 'data' else value.decode('utf-8')
+            else: simplify(value)
+    elif isinstance(data, list):
+        for n in range(len(data)):
+            item = data[n]
+            if isinstance(item, bytes):
+                try: data[n] = item.decode('utf-8')
+                except: data[n] = item.hex()
+            else:
+                simplify(item)
+
 def main():
     arguments = argparse.ArgumentParser()
     arguments.add_argument('--file', '-f', nargs='+', required=True)
+    arguments.add_argument('--command', '-c', choices=Commands.get_option_choices(), default=Commands.dump)
     arguments.add_argument('--debug', '-d', action='store_true')
+    arguments.add_argument('--types', '-t', nargs='+', type=int)
+    print(Commands.get_option_choices())
     options = arguments.parse_args(sys.argv[1:])
+    command = options.command  # type: str
     from serialize import SerializeFile
+    import os.path as p
+    import os, json
     for file_path in options.file:
         print('>>>', file_path)
         ab = UnityArchiveFile(debug=options.debug)
@@ -255,8 +288,40 @@ def main():
             node.size = fs.length
         serializer = SerializeFile(debug=options.debug, node=node)
         serializer.decode(fs)
-        serializer.dump(fs)
-
+        if command == Commands.dump:
+            serializer.dump(fs)
+        elif command == Commands.type:
+            for type_tree in serializer.type_trees:
+                print('{:3d} {}'.format(type_tree.persistent_type_id, type_tree.nodes[0].type))
+        elif command == Commands.save:
+            assert options.types
+            file_name = p.basename(file_path)
+            file_name = file_name[:file_name.rfind('.')]
+            output_path = p.join('__output/{}'.format(file_name))
+            if not p.exists(output_path): os.makedirs(output_path)
+            for o in serializer.objects:
+                type_tree = serializer.type_trees[o.type_id]
+                if type_tree.persistent_type_id in options.types:
+                    fs.seek(serializer.header.data_offset + o.byte_start)
+                    target = serializer.deserialize(fs, meta_type=type_tree.type_dict.get(0))
+                    print(target)
+                    data = b''
+                    name = target['m_Name']  # type: bytes
+                    extension = 'bin'
+                    if type_tree.name == 'Texture2D':
+                        data = target['image data'].get('data')
+                        extension = 'tex'
+                    elif type_tree.name == 'TextAsset':
+                        data = target.get('m_Script')
+                        extension = 'bytes'
+                    elif type_tree.name == 'Sprite':
+                        simplify(target)
+                        data = json.dumps(target, ensure_ascii=False, indent=4).encode('utf-8')
+                        extension = 'json'
+                    if not data: data = b''
+                    with open('{}/{}.{}'.format(output_path, name.decode('utf-8'), extension), 'wb') as fp:
+                        fp.write(data)
+                        print('  + {}'.format(fp.name))
 
 if __name__ == '__main__':
     main()

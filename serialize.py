@@ -206,6 +206,8 @@ class SerializeFile(object):
             if node.is_array:
                 element_type = meta_type.type_tree.nodes[node.index + 2]
                 element_count = fs.read_sint32()
+                array = result[node.name] = {'size': element_count}
+                if element_count == 0: continue
                 if element_type.byte_size == 1:
                     result[node.name] = fs.read(element_count) if element_count > 0 else b''
                     fs.align()
@@ -224,7 +226,7 @@ class SerializeFile(object):
                         for m in range(element_count):
                             it = self.deserialize(fs, meta_type=type_map.get(element_type.index))
                             items.append(it)
-                    result[node.name] = items
+                    array['data'] = items
                     fs.align()
             elif node.type == 'string':
                 size = fs.read_sint32()

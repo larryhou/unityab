@@ -309,7 +309,7 @@ def main():
                     name = target['m_Name']  # type: bytes
                     extension = 'bin'
                     if type_tree.name == 'Texture2D':
-                        data = target['image data'].get('data')
+                        data = target['image data'].get('data', b'')
                         extension = 'tex'
                     elif type_tree.name == 'TextAsset':
                         data = target.get('m_Script')
@@ -318,7 +318,6 @@ def main():
                         simplify(target)
                         data = json.dumps(target, ensure_ascii=False, indent=4).encode('utf-8')
                         extension = 'json'
-                    if not data: data = b''
                     with open('{}/{}.{}'.format(output_path, name.decode('utf-8'), extension), 'wb') as fp:
                         fp.write(data)
                         print('  + {}'.format(fp.name))

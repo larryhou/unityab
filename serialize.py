@@ -1,6 +1,7 @@
 from stream import FileStream
 from typing import List, Dict
 from strings import get_caculate_string
+from unity import FileNode
 import io, uuid
 
 MONO_BEHAVIOUR_PERSISTENT_ID = 114
@@ -157,9 +158,9 @@ class ExternalInfo(object):
         return '{{guid=\'{}\', type={}, path=\'{}\'}}'.format(uuid.UUID(bytes=self.guid), self.type, self.path)
 
 class SerializeFile(object):
-    def __init__(self, offset:int = 0, debug:bool = True):
+    def __init__(self, node:FileNode, debug:bool = True):
         self.debug: bool = debug
-        self.offset: int = offset
+        self.node: FileNode = node
         self.header: SerializeFileHeader = SerializeFileHeader()
         self.version: str = ''
         self.platform: int = 0
@@ -263,7 +264,7 @@ class SerializeFile(object):
 
     def dump(self, fs: FileStream):
         for o in self.objects:
-            fs.seek(self.offset + self.header.data_offset + o.byte_start)
+            fs.seek(self.node.offset + self.header.data_offset + o.byte_start)
             type_tree = self.metadata_types[o.type_id]
             if not type_tree.type_dict: continue
             try:
@@ -277,11 +278,11 @@ class SerializeFile(object):
         self.print('position={} remain={}'.format(fs.position, fs.bytes_available))
 
     def decode(self, fs:FileStream):
-        fs.seek(self.offset)
+        fs.seek(self.node.offset)
         header = self.header
         header.metadata_size = fs.read_sint32()
         header.file_size = fs.read_sint32()
-        # assert fs.length == header.file_size, '{} != {}'.format(fs.length, header.file_size)
+        assert self.node.size == header.file_size, '{} != {}'.format(self.node.size, header.file_size)
         header.version = fs.read_sint32()
         header.data_offset = fs.read_sint32()
         header.endianess = fs.read_boolean()

@@ -36,7 +36,7 @@ class UnitySignature(object):
     UnityRaw = 'UnityRaw'
     UnityArchive = 'UnityArchive'
 
-class Node(object):
+class FileNode(object):
     def __init__(self):
         self.offset: int = 0
         self.size: int = 0
@@ -62,11 +62,11 @@ class Node(object):
 
 class DirectoryInfo(object):
     def __init__(self):
-        self.nodes: List[Node] = []
+        self.nodes: List[FileNode] = []
 
     def decode(self, fs: FileStream):
         for _ in range(fs.read_uint32()):
-            node = Node()
+            node = FileNode()
             node.decode(fs)
             self.nodes.append(node)
 
@@ -248,9 +248,12 @@ def main():
         ab = UnityArchiveFile(debug=options.debug)
         try:
             fs = ab.decode(file_path=file_path)
+            node = ab.direcory_info.nodes[0]
         except:
             fs = FileStream(file_path=file_path)
-        serializer = SerializeFile(debug=options.debug)
+            node = FileNode()
+            node.size = fs.length
+        serializer = SerializeFile(debug=options.debug, node=node)
         serializer.decode(fs)
         serializer.dump(fs)
 

@@ -209,7 +209,7 @@ class SerializeFile(object):
                 array = result[node.name] = {'size': element_count}
                 if element_count == 0: continue
                 if element_type.byte_size == 1:
-                    result[node.name] = fs.read(element_count) if element_count > 0 else b''
+                    array['data'] = fs.read(element_count) if element_count > 0 else b''
                     fs.align()
                 else:
                     items = []

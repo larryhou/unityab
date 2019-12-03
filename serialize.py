@@ -32,7 +32,32 @@ class MetadataTypeTree(object):
         self.type_tree_enabled: bool = type_tree_enabled
         self.type_dict: Dict[int, MetadataType] = {}
 
+    def __decode_type_tree(self, fs: FileStream):
+        type_index = -1
+        node_count = fs.read_uint32()
+        char_count = fs.read_uint32()
+        print(node_count, char_count)
+        for _ in range(node_count):
+            node = TypeField()
+            node.decode(fs)
+            if type_index >= 0: assert node.index == type_index + 1
+            self.nodes.append(node)
+            type_index += 1
+        if char_count > 0:
+            string_offset = fs.position
+            string_size = 0
+            while string_size + 1 < char_count:
+                offset = fs.position - string_offset
+                position = fs.position
+                self.strings[offset] = fs.read_string()
+                string_size += fs.position - position
+            assert fs.position - string_offset == char_count
+        for node in self.nodes:  # type: TypeField
+            node.name = get_caculate_string(offset=node.name_str_offset, strings=self.strings)
+            node.type = get_caculate_string(offset=node.type_str_offset, strings=self.strings)
+
     def decode(self, fs: FileStream):
+        offset = fs.position
         self.persistent_type_id = fs.read_sint32()
         self.is_stripped_type = fs.read_boolean()
         self.script_type_index = fs.read_sint16()
@@ -41,29 +66,20 @@ class MetadataTypeTree(object):
         self.type_hash = fs.read(16)
         self.nodes = []
         self.strings = {}
-        type_index = -1
         if self.type_tree_enabled:
-            node_count = fs.read_uint32()
-            char_count = fs.read_uint32()
-            for _ in range(node_count):
-                node = TypeField()
-                node.decode(fs)
-                if type_index >= 0: assert node.index == type_index + 1
-                self.nodes.append(node)
-                type_index += 1
-            if char_count > 0:
-                string_offset = fs.position
-                string_size = 0
-                while string_size + 1 < char_count:
-                    offset = fs.position - string_offset
-                    position = fs.position
-                    self.strings[offset] = fs.read_string()
-                    string_size += fs.position - position
-                assert fs.position - string_offset == char_count
-            for node in self.nodes:  # type: TypeField
-                node.name = get_caculate_string(offset=node.name_str_offset, strings=self.strings)
-                node.type = get_caculate_string(offset=node.type_str_offset, strings=self.strings)
-                # print(vars(node))
+            self.__decode_type_tree(fs)
+        else:
+            import os.path as p
+            type_path = p.join(p.dirname(p.abspath(__file__)), 'types')
+            file_path = '{}/{}_{}.type'.format(type_path, self.persistent_type_id, self.type_hash.hex())
+            print(file_path)
+            if p.exists(file_path):
+                tmp = FileStream(file_path=file_path)
+                tmp.endian = '<'
+                persistent_type_id = tmp.read_sint32()
+                assert persistent_type_id == self.persistent_type_id, '{} != {}'.format(persistent_type_id, self.persistent_type_id)
+                tmp.seek(fs.position - offset)
+                self.__decode_type_tree(fs=tmp)
 
     def __repr__(self):
         buf = io.StringIO()
@@ -89,7 +105,7 @@ class TypeField(object):
         self.name_str_offset: int = 0  # uint32
         self.byte_size: int = 0  # sint32
         self.index = -1  # sint32
-        self.meta_flag = 0  # uint32
+        self.meta_flags = 0  # uint32
 
     def decode(self, fs: FileStream):
         self.version = fs.read_sint16()
@@ -99,7 +115,7 @@ class TypeField(object):
         self.name_str_offset = fs.read_uint32()
         self.byte_size = fs.read_sint32()
         self.index = fs.read_sint32()
-        self.meta_flag = fs.read_uint32()
+        self.meta_flags = fs.read_uint32()
 
     def __repr__(self):
         return '{{{}:\'{}\'}}'.format(self.name, self.type)
@@ -143,7 +159,8 @@ class ExternalInfo(object):
         return '{{guid=\'{}\', type={}, path=\'{}\'}}'.format(uuid.UUID(bytes=self.guid), self.type, self.path)
 
 class SerializeFile(object):
-    def __init__(self):
+    def __init__(self, offset:int = 0):
+        self.offset: int = offset
         self.header: SerializeFileHeader = SerializeFileHeader()
         self.version: str = ''
         self.platform: int = 0
@@ -234,21 +251,27 @@ class SerializeFile(object):
                 fs.align()
             elif node.type in self.__premitive_decoders:
                 result[node.name] = self.__premitive_decoders.get(node.type)(fs)
-                if node.meta_flag & 0x4000 != 0: fs.align()
+                if node.meta_flags & 0x4000 != 0: fs.align()
             else:
                 result[node.name] = self.deserialize(fs, meta_type=type_map.get(node.index))
         return result
 
     def dump(self, fs: FileStream):
         for o in self.objects:
-            fs.seek(self.header.data_offset + o.byte_start)
+            fs.seek(self.offset + self.header.data_offset + o.byte_start)
             type_tree = self.metadata_types[o.type_id]
-            print(fs.position, vars(type_tree.type_dict.get(0)))
+            try:
+                print(vars(type_tree.type_dict.get(0)))
+            except: continue
+            offset = fs.position
             data = self.deserialize(fs=fs, meta_type=type_tree.type_dict.get(0))
+            assert fs.position - offset == o.byte_size
             print(data)
             print()
+        print(fs.position, fs.bytes_available)
 
     def decode(self, fs:FileStream):
+        fs.seek(self.offset)
         header = self.header
         header.metadata_size = fs.read_sint32()
         header.file_size = fs.read_sint32()
@@ -266,8 +289,15 @@ class SerializeFile(object):
         type_count = fs.read_uint32()
         print('type', type_count)
         for _ in range(type_count):
+            offset = fs.position
             type_tree = MetadataTypeTree(type_tree_enabled=self.type_tree_enabled)
             type_tree.decode(fs)
+            if self.type_tree_enabled:
+                position = fs.position
+                fs.seek(offset)
+                type_data = fs.read(position - offset)
+                with open('types/{}_{}.type'.format(type_tree.persistent_type_id, type_tree.type_hash.hex()), 'wb') as fp:
+                    fp.write(type_data)
             self.metadata_types.append(type_tree)
             self.register_type_tree(type_tree=type_tree)
             print(type_tree)
@@ -298,7 +328,6 @@ class SerializeFile(object):
             print(ext)
 
         fs.read_string()
-        print(fs.position)
 
 
 

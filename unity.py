@@ -173,7 +173,7 @@ class UnityArchiveFile(object):
         self.blocks_offsets: List[int] = []
         self.minimum_read_buffer_size: int = 0
 
-    def read(self, file_path: str):
+    def decode(self, file_path: str):
         fs = FileStream()
         fs.open(file_path)
         self.header.decode(fs)
@@ -233,13 +233,21 @@ class UnityArchiveFile(object):
         self.minimum_read_buffer_size = int(self.minimum_read_buffer_size / worst_compression_ratio)
         print(self.minimum_read_buffer_size, worst_compression_ratio)
 
-if __name__ == '__main__':
+def main():
     arguments = argparse.ArgumentParser()
     arguments.add_argument('--file', '-f', required=True)
     options = arguments.parse_args(sys.argv[1:])
     ab = UnityArchiveFile()
-    fs = ab.read(file_path=options.file)
+    try:
+        fs = ab.decode(file_path=options.file)
+    except:
+        fs = FileStream(file_path=options.file)
+
     from serialize import SerializeFile
     serializer = SerializeFile()
     serializer.decode(fs)
     serializer.dump(fs)
+
+
+if __name__ == '__main__':
+    main()

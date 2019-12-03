@@ -167,8 +167,10 @@ class SerializeFile(object):
             'unsigned int': FileStream.read_uint32,
             'SInt64': FileStream.read_sint64,
             'UInt64': FileStream.read_uint64,
-            'float': FileStream.read_float,
             'long': FileStream.read_sint64,
+            'unsigned long': FileStream.read_uint64,
+            'float': FileStream.read_float,
+            'double': FileStream.read_double,
         }
 
     @staticmethod

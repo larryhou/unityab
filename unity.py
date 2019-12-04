@@ -312,7 +312,6 @@ def processs(parameters: Dict[str, any]):
                         fp.write(json.dumps(target, ensure_ascii=False, indent=4))
                     print(target)
                 elif type_tree.name == 'TextAsset':
-                    print(target)
                     data = target.get('m_Script')
                     extension = 'bytes'
                 else:

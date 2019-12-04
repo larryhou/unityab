@@ -283,13 +283,12 @@ def processs(parameters: Dict[str, any]):
         for type_tree in serializer.type_trees:
             print('{:3d} \033[33m{} \033[36m{} \033[32m{}\033[0m'.format(type_tree.persistent_type_id, type_tree.nodes[0].type, uuid.UUID(bytes=type_tree.type_hash), type_tree.script_type_index))
     elif command == Commands.save:
-        assert options.types
         file_name = p.basename(parameters.get('file_path'))
         file_name = file_name[:file_name.rfind('.')]
         for o in serializer.objects:
             type_tree = serializer.type_trees[o.type_id]
             export_path = p.join('__export/{}/{}/{}'.format(file_name, serializer.node.path, type_tree.name))
-            if type_tree.persistent_type_id in options.types:
+            if not options.types or type_tree.persistent_type_id in options.types:
                 if not p.exists(export_path): os.makedirs(export_path)
                 stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
                 target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))

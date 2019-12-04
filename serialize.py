@@ -127,6 +127,7 @@ class ObjectInfo(object):
         self.byte_start: int = 0   # uint32
         self.byte_size: int = 0  # uint32
         self.type_id: int = 0  # uint32
+        self.type: str = ''
 
     def decode(self, fs: FileStream):
         self.local_identifier_in_file = fs.read_sint64()
@@ -159,7 +160,7 @@ class ExternalInfo(object):
     def __repr__(self):
         return '{{guid=\'{}\', type={}, path=\'{}\'}}'.format(uuid.UUID(bytes=self.guid), self.type, self.path)
 
-class SerializeFile(object):
+class SerializedFile(object):
     def __init__(self, node:FileNode, debug:bool = True):
         self.debug: bool = debug
         self.node: FileNode = node
@@ -318,6 +319,8 @@ class SerializeFile(object):
             fs.align(4)
             obj = ObjectInfo()
             obj.decode(fs)
+            type_tree = self.type_trees[obj.type_id]
+            obj.type = type_tree.name
             self.objects.append(obj)
             self.print(vars(obj))
 

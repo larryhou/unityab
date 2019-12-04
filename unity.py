@@ -8,7 +8,10 @@ import lz4.block
 
 from format import TextureFormat
 from stream import FileStream
-from typing import List
+from typing import List, Dict
+
+import serialize
+import os, json
 
 UINT64_MAX = (1 << 64) - 1
 
@@ -250,12 +253,12 @@ class Commands(object):
             if name == value: choices.append(name)
         return choices
 
-def simplify(data):
+def standardize(data):
     if isinstance(data, dict):
         for key, value in data.items():  # type: str, any
             if isinstance(value, bytes):
                 data[key] = value.hex() if key == 'data' else value.decode('utf-8')
-            else: simplify(value)
+            else: standardize(value)
     elif isinstance(data, list):
         for n in range(len(data)):
             item = data[n]
@@ -263,7 +266,64 @@ def simplify(data):
                 try: data[n] = item.decode('utf-8')
                 except: data[n] = item.hex()
             else:
-                simplify(item)
+                standardize(item)
+
+def processs(parameters: Dict[str, any]):
+    import os.path as p
+    serializer = parameters.get('serializer')  # type: serialize.SerializedFile
+    options = parameters.get('options')
+    archive = parameters.get('archive')  # type: UnityArchiveFile
+    command = options.command  # type: str
+    stream = parameters.get('stream')  # type: FileStream
+
+    if command == Commands.dump:
+        serializer.dump(stream)
+    elif command == Commands.type:
+        import uuid
+        for type_tree in serializer.type_trees:
+            print('{:3d} \033[33m{} \033[36m{} \033[32m{}\033[0m'.format(type_tree.persistent_type_id, type_tree.nodes[0].type, uuid.UUID(bytes=type_tree.type_hash), type_tree.script_type_index))
+    elif command == Commands.save:
+        assert options.types
+        file_name = p.basename(parameters.get('file_path'))
+        file_name = file_name[:file_name.rfind('.')]
+        for o in serializer.objects:
+            type_tree = serializer.type_trees[o.type_id]
+            export_path = p.join('__export/{}/{}/{}'.format(file_name, serializer.node.path, type_tree.name))
+            if type_tree.persistent_type_id in options.types:
+                if not p.exists(export_path): os.makedirs(export_path)
+                stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
+                target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))
+                name = target.get('m_Name')  # type: bytes
+                if not name: name = '{}'.format(o.local_identifier_in_file).encode('utf-8')
+                if type_tree.name == 'Texture2D':
+                    target['m_TextureFormat'] = TextureFormat(target['m_TextureFormat']).__repr__()
+                    target['m_ForcedFallbackFormat'] = TextureFormat(target['m_ForcedFallbackFormat']).__repr__()
+                    data = target['image data'].get('data', b'')
+                    if not data:
+                        stream_data = target.get('m_StreamData')  # type: dict
+                        offset = stream_data.get('offset')
+                        size = stream_data.get('size')
+                        node = archive.direcory_info.nodes[1]
+                        stream.seek(node.offset + offset)
+                        data = stream.read(size)
+                    extension = 'tex'
+                    with open('{}/{}.json'.format(export_path, name.decode('utf-8')), 'w') as fp:
+                        del target['image data']
+                        standardize(target)
+                        fp.write(json.dumps(target, ensure_ascii=False, indent=4))
+                    print(target)
+                elif type_tree.name == 'TextAsset':
+                    print(target)
+                    data = target.get('m_Script')
+                    extension = 'bytes'
+                else:
+                    print(vars(o), target)
+                    standardize(target)
+                    data = json.dumps(target, ensure_ascii=False, indent=4).encode('utf-8')
+                    extension = 'json'
+                with open('{}/{}.{}'.format(export_path, name.decode('utf-8'), extension), 'wb') as fp:
+                    fp.write(data)
+                    print('  + {}'.format(fp.name))
 
 def main():
     arguments = argparse.ArgumentParser()
@@ -271,68 +331,31 @@ def main():
     arguments.add_argument('--command', '-c', choices=Commands.get_option_choices(), default=Commands.dump)
     arguments.add_argument('--debug', '-d', action='store_true')
     arguments.add_argument('--types', '-t', nargs='+', type=int)
-    print(Commands.get_option_choices())
+
     options = arguments.parse_args(sys.argv[1:])
-    command = options.command  # type: str
-    from serialize import SerializeFile
-    import os.path as p
-    import os, json
     for file_path in options.file:
         print('>>>', file_path)
-        ab = UnityArchiveFile(debug=options.debug)
+        archive = UnityArchiveFile(debug=options.debug)
         try:
-            fs = ab.decode(file_path=file_path)
-            node = ab.direcory_info.nodes[0]
+            stream = archive.decode(file_path=file_path)
+            node = archive.direcory_info.nodes[0]
         except:
-            fs = FileStream(file_path=file_path)
+            stream = FileStream(file_path=file_path)
             node = FileNode()
-            node.size = fs.length
-        serializer = SerializeFile(debug=options.debug, node=node)
-        serializer.decode(fs)
-        if command == Commands.dump:
-            serializer.dump(fs)
-        elif command == Commands.type:
-            for type_tree in serializer.type_trees:
-                print('{:3d} {}'.format(type_tree.persistent_type_id, type_tree.nodes[0].type))
-        elif command == Commands.save:
-            assert options.types
-            file_name = p.basename(file_path)
-            file_name = file_name[:file_name.rfind('.')]
-            output_path = p.join('__output/{}'.format(file_name))
-            if not p.exists(output_path): os.makedirs(output_path)
-            for o in serializer.objects:
-                type_tree = serializer.type_trees[o.type_id]
-                if type_tree.persistent_type_id in options.types:
-                    fs.seek(serializer.header.data_offset + o.byte_start)
-                    target = serializer.deserialize(fs, meta_type=type_tree.type_dict.get(0))
-                    data = b''
-                    name = target['m_Name']  # type: bytes
-                    extension = 'bin'
-                    if type_tree.name == 'Texture2D':
-                        target['m_TextureFormat'] = TextureFormat(target['m_TextureFormat'])
-                        print(target)
-                        data = target['image data'].get('data', b'')
-                        if not data:
-                            stream_data = target.get('m_StreamData')  # type: dict
-                            offset = stream_data.get('offset')
-                            size = stream_data.get('size')
-                            node = ab.direcory_info.nodes[1]
-                            fs.seek(node.offset + offset)
-                            data = fs.read(size)
-                        extension = 'tex'
-                    elif type_tree.name == 'TextAsset':
-                        print(target)
-                        data = target.get('m_Script')
-                        extension = 'bytes'
-                    elif type_tree.name == 'Sprite':
-                        print(target)
-                        simplify(target)
-                        data = json.dumps(target, ensure_ascii=False, indent=4).encode('utf-8')
-                        extension = 'json'
-                    else: print(target)
-                    with open('{}/{}.{}'.format(output_path, name.decode('utf-8'), extension), 'wb') as fp:
-                        fp.write(data)
-                        print('  + {}'.format(fp.name))
+            node.size = stream.length
+        if archive.direcory_info.nodes:
+            for node in archive.direcory_info.nodes:
+                if node.flags == NodeFlags.SerializedFile:
+                    print('[+] {} {:,}'.format(node.path, node.size))
+                    stream.endian = '>'
+                    serializer = serialize.SerializedFile(debug=options.debug, node=node)
+                    serializer.decode(stream)
+                    processs(parameters=locals())
+        else:
+            serializer = serialize.SerializedFile(debug=options.debug, node=node)
+            serializer.decode(stream)
+            processs(parameters=locals())
+
 
 if __name__ == '__main__':
     main()

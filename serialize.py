@@ -228,6 +228,7 @@ class SerializedFile(object):
 
     def deserialize(self, fs: FileStream, meta_type: MetadataType):
         result = {}
+        if not meta_type: return result
         type_map = meta_type.type_tree.type_dict
         for n in range(len(meta_type.fields)):
             node = meta_type.fields[n]

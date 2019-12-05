@@ -289,7 +289,7 @@ def processs(parameters: Dict[str, any]):
                     target['m_TextureFormat'] = TextureFormat(target['m_TextureFormat']).__repr__()
                     target['m_ForcedFallbackFormat'] = TextureFormat(target['m_ForcedFallbackFormat']).__repr__()
                     data = target['image data'].get('data', b'')  # type: bytes
-                    if not data:
+                    if not data and archive.direcory_info.nodes:
                         stream_data = target.get('m_StreamData')  # type: dict
                         offset = stream_data.get('offset')
                         size = stream_data.get('size')
@@ -309,8 +309,8 @@ def processs(parameters: Dict[str, any]):
                 else:
                     standardize(target)
                     definition = ''
-                    if type_tree.persistent_type_id == serialize.MONO_BEHAVIOUR_PERSISTENT_ID:
-                        ref = target['m_Script']  # type: dict
+                    if type_tree.persistent_type_id == serialize.MONO_BEHAVIOUR_PERSISTENT_ID and target:
+                        ref = target.get('m_Script')  # type: dict
                         entity = ref.get('m_PathID')  # type: int
                         if entity in mono_scripts:
                             class_name, namespace, assembly = [x.decode('utf-8') for x in mono_scripts.get(entity)]  # type: tuple
@@ -344,11 +344,11 @@ def collect_mono_scripts(serializer, stream: FileStream):
             if o.local_identifier_in_file not in mono_scripts:
                 mono_scripts_stream.write(struct.pack('q', o.local_identifier_in_file))
                 mono_scripts_stream.write(struct.pack('i', len(type_name)))
-                mono_scripts_stream.write(o.type_name)
+                mono_scripts_stream.write(type_name)
                 mono_scripts_stream.write(struct.pack('i', len(namespace)))
-                mono_scripts_stream.write(o.namespace)
+                mono_scripts_stream.write(namespace)
                 mono_scripts_stream.write(struct.pack('i', len(assembly)))
-                mono_scripts_stream.write(o.assembly)
+                mono_scripts_stream.write(assembly)
 
 def main():
     arguments = argparse.ArgumentParser()
@@ -389,14 +389,18 @@ def load_scripts():
     fp.seek(0, os.SEEK_END)
     length = fp.tell()
     fp.seek(0)
-    while fp.tell() < length:
-        identifer, = struct.unpack('q', fp.read(8))
-        values = []
-        for _ in range(3):
-            size, = struct.unpack('i', fp.read(4))
-            values.append(fp.read(size) if size > 0 else b'')
-        mono_scripts[identifer] = tuple(values)
-    assert fp.tell() == length
+    position = 0
+    try:
+        while fp.tell() < length:
+            identifer, = struct.unpack('q', fp.read(8))
+            values = []
+            for _ in range(3):
+                size, = struct.unpack('i', fp.read(4))
+                values.append(fp.read(size) if size > 0 else b'')
+            mono_scripts[identifer] = tuple(values)
+            position = fp.tell()
+        assert fp.tell() == length
+    except: fp.truncate(position)
     return fp
 
 if __name__ == '__main__':

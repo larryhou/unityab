@@ -281,7 +281,6 @@ def processs(parameters: Dict[str, any]):
                 if not p.exists(export_path): os.makedirs(export_path)
                 stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
                 target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))
-
                 name = target.get('m_Name')
                 if not name: name = '{}_{}'.format(o.local_identifier_in_file, type_tree.name)
                 else: name = name.decode('utf-8')
@@ -338,17 +337,17 @@ def collect_mono_scripts(serializer, stream: FileStream):
         if o.type_id == MONO_SCRIPT_TYPE_ID:
             stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
             script = serializer.deserialize(fs=stream, meta_type=type_tree.type_dict.get(0))
-            o.type_name = script.get('m_ClassName')
-            o.namespace = script.get('m_Namespace')
-            o.assembly = script.get('m_AssemblyName')
-            # encode mono scripts to cache file
+            type_name = script.get('m_ClassName')
+            namespace = script.get('m_Namespace')
+            assembly = script.get('m_AssemblyName')
+            # encode mono scripts to cache storage
             if o.local_identifier_in_file not in mono_scripts:
                 mono_scripts_stream.write(struct.pack('q', o.local_identifier_in_file))
-                mono_scripts_stream.write(struct.pack('i', len(o.type_name)))
+                mono_scripts_stream.write(struct.pack('i', len(type_name)))
                 mono_scripts_stream.write(o.type_name)
-                mono_scripts_stream.write(struct.pack('i', len(o.namespace)))
+                mono_scripts_stream.write(struct.pack('i', len(namespace)))
                 mono_scripts_stream.write(o.namespace)
-                mono_scripts_stream.write(struct.pack('i', len(o.assembly)))
+                mono_scripts_stream.write(struct.pack('i', len(assembly)))
                 mono_scripts_stream.write(o.assembly)
 
 def main():

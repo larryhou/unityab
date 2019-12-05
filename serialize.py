@@ -129,9 +129,6 @@ class ObjectInfo(object):
         self.byte_size: int = 0  # uint32
         self.type_id: int = 0  # uint32
         self.name: str = ''
-        self.type_name: str = ''
-        self.namespace: str = ''
-        self.assembly: str = ''
 
     def decode(self, fs: FileStream):
         self.local_identifier_in_file = fs.read_sint64()

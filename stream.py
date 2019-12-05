@@ -254,7 +254,7 @@ class FileStream(object):
         return self.read(4)
 
     @staticmethod
-    def swap_endian(v: int) -> int:
+    def reverse(v: int) -> int:
         if v >= 0:
             if v < (1 << 32):
                 data = struct.pack('>I', v)

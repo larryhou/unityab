@@ -318,7 +318,7 @@ def processs(parameters: Dict[str, any]):
                             type_name = '<{}::\033[4m{}\033[0m,\033[2m{}\033[0m>'.format(script.namespace if script.namespace else 'global', script.type_name, script.assembly)
                             name = '{}_{}'.format(name, script.type_name)
                         else:
-                            print('\033[31m[E]{} {} \033[33m{}\033[0m'.format(entity, o, target))
+                            print('\033[31m[E]{}\033[0m'.format(entity))
                     print('{} \033[36m{}\033[0m'.format(type_name, target))
                     data = json.dumps(target, ensure_ascii=False, indent=4)
                     write('{}/{}.json'.format(export_path, name), data, mode='w')

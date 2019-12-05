@@ -276,10 +276,14 @@ def processs(parameters: Dict[str, any]):
         file_name = file_name[:file_name.rfind('.')]
         for o in serializer.objects:
             type_tree = serializer.type_trees[o.type_id]
+            if not type_tree.type_dict:
+                print('\033[31m[E][INCOMPLETE_TYPE_TREE] \033[33m{}\033[0m'.format(type_tree))
+                continue
             export_path = p.join('__export/{}/{}/{}'.format(file_name, serializer.node.path, type_tree.name))
             if not options.types or type_tree.persistent_type_id in options.types:
                 if not p.exists(export_path): os.makedirs(export_path)
                 stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
+                print(type_tree)
                 target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))
                 name = target.get('m_Name')
                 if not name: name = '{}_{}'.format(o.local_identifier_in_file, type_tree.name)

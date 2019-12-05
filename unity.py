@@ -310,8 +310,8 @@ def processs(parameters: Dict[str, any]):
                     standardize(target)
                     definition = ''
                     if type_tree.persistent_type_id == serialize.MONO_BEHAVIOUR_PERSISTENT_ID and target:
-                        ref = target.get('m_Script')  # type: dict
-                        entity = ref.get('m_PathID')  # type: int
+                        ptr = target.get('m_Script')  # type: dict
+                        entity = ptr.get('m_PathID')  # type: int
                         if entity in mono_scripts:
                             class_name, namespace, assembly = [x.decode('utf-8') for x in mono_scripts.get(entity)]  # type: tuple
                             definition = '<{}::\033[4m{}\033[0m,\033[2m{}\033[0m>'.format(namespace if namespace else 'global', class_name, assembly)

@@ -357,8 +357,15 @@ def main():
     arguments.add_argument('--command', '-c', choices=Commands.get_option_choices(), default=Commands.dump)
     arguments.add_argument('--debug', '-d', action='store_true')
     arguments.add_argument('--types', '-t', nargs='+', type=int)
-
+    arguments.add_argument('--dump-mono-scripts', '-dms', action='store_true')
     options = arguments.parse_args(sys.argv[1:])
+    if options.dump_mono_scripts:
+        mono_script_keys = list(mono_scripts.keys())
+        mono_script_keys.sort()
+        for identifier in mono_script_keys:
+            class_name, namespace, assembly = [x.decode('utf-8') for x in mono_scripts.get(identifier)]
+            print('\033[36m{} \033[33m{}::\033[4m{}\033[0m \033[2m{}\033[0m'.format(identifier, namespace if namespace else 'global', class_name, assembly))
+
     for file_path in options.file:
         print('>>>', file_path)
         archive = UnityArchiveFile(debug=options.debug)

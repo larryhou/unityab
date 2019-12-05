@@ -282,7 +282,7 @@ def processs(parameters: Dict[str, any]):
                 target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))
 
                 name = target.get('m_Name')
-                if not name: name = '{}'.format(o.local_identifier_in_file)
+                if not name: name = '{}_{}'.format(o.local_identifier_in_file, type_tree.name)
                 else: name = name.decode('utf-8')
                 print('\033[33m{}'.format(o), end=' ')
                 if type_tree.name == 'Texture2D':
@@ -316,7 +316,7 @@ def processs(parameters: Dict[str, any]):
                         if entity in mono_scripts:
                             script = mono_scripts.get(entity)
                             type_name = '<{}::\033[4m{}\033[0m,\033[2m{}\033[0m>'.format(script.namespace if script.namespace else 'global', script.type_name, script.assembly)
-                            name = '{}_{}'.format(name, script.type_name)
+                            name = '{}_{}'.format(o.local_identifier_in_file, script.type_name)
                         else:
                             print('\033[31m[E]{}\033[0m'.format(entity))
                     print('{} \033[36m{}\033[0m'.format(type_name, target))

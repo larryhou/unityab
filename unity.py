@@ -349,6 +349,7 @@ def collect_mono_scripts(serializer, stream: FileStream):
                 mono_scripts_stream.write(namespace)
                 mono_scripts_stream.write(struct.pack('i', len(assembly)))
                 mono_scripts_stream.write(assembly)
+                mono_scripts[o.local_identifier_in_file] = type_name, namespace, assembly
 
 def main():
     arguments = argparse.ArgumentParser()

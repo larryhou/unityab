@@ -5,6 +5,7 @@ from unity import FileNode
 import io, uuid
 
 MONO_BEHAVIOUR_PERSISTENT_ID = 114
+MONO_SCRIPT_PERSISTENT_ID = 115
 
 class SerializeFileHeader(object):
     def __init__(self):
@@ -127,13 +128,21 @@ class ObjectInfo(object):
         self.byte_start: int = 0   # uint32
         self.byte_size: int = 0  # uint32
         self.type_id: int = 0  # uint32
-        self.type: str = ''
+        self.name: str = ''
+        self.type_name: str = ''
+        self.namespace: str = ''
+        self.assembly: str = ''
 
     def decode(self, fs: FileStream):
         self.local_identifier_in_file = fs.read_sint64()
         self.byte_start = fs.read_uint32()
         self.byte_size = fs.read_uint32()
         self.type_id = fs.read_uint32()
+
+    def __repr__(self):
+        if not self.type_name:
+            return '{{id={}, type={}}}'.format(self.local_identifier_in_file, self.name)
+        return '{{id={}, type={}, class={}}}'.format(self.local_identifier_in_file, self.name, self.type_name)
 
 class ScriptTypeInfo(object):
     def __init__(self):
@@ -295,7 +304,7 @@ class SerializedFile(object):
         self.version = fs.read_string()
         self.platform = fs.read_uint32()
         self.type_tree_enabled = fs.read_boolean()
-        self.print(self.version, self.platform, self.type_tree_enabled)
+        self.print('version={} platform={} type_tree_enabled={}'.format(self.version, self.platform, self.type_tree_enabled))
         self.type_trees = []
         type_count = fs.read_uint32()
         self.print('type', type_count)
@@ -320,7 +329,7 @@ class SerializedFile(object):
             obj = ObjectInfo()
             obj.decode(fs)
             type_tree = self.type_trees[obj.type_id]
-            obj.type = type_tree.name
+            obj.name = type_tree.name
             self.objects.append(obj)
             self.print(vars(obj))
 
@@ -339,8 +348,9 @@ class SerializedFile(object):
             ext.decode(fs)
             self.externals.append(ext)
             self.print(ext)
-
         fs.read_string()
+
+
 
 
 

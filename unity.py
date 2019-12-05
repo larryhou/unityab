@@ -46,6 +46,7 @@ class FileNode(object):
         self.size: int = 0
         self.flags: int = 0
         self.path: str = ''
+        self.index: int = -1
 
     @property
     def is_directory(self) -> bool:
@@ -69,9 +70,10 @@ class DirectoryInfo(object):
         self.nodes: List[FileNode] = []
 
     def decode(self, fs: FileStream):
-        for _ in range(fs.read_uint32()):
+        for n in range(fs.read_uint32()):
             node = FileNode()
             node.decode(fs)
+            node.index = n
             self.nodes.append(node)
 
 class StorageBlock(object):
@@ -174,9 +176,6 @@ class UnityArchiveFile(object):
         self.blocks_info: BlocksInfo = BlocksInfo()
         self.direcory_info: DirectoryInfo = DirectoryInfo()
         self.data_offset: int = 0
-        self.uncompressed_blocks_offsets: List[int] = []
-        self.blocks_offsets: List[int] = []
-        self.minimum_read_buffer_size: int = 0
 
     def print(self, *args):
         if self.debug: print(*args)
@@ -206,7 +205,6 @@ class UnityArchiveFile(object):
                 uncompressed_data = lz4.block.decompress(compressed_data, block.uncompressed_size)
                 assert len(uncompressed_data) == block.uncompressed_size, uncompressed_data
                 buffer.write(uncompressed_data)
-                # print(uncompressed_data)
             else:
                 uncompressed_data = fs.read(block.uncompressed_size)
                 buffer.write(uncompressed_data)
@@ -219,27 +217,10 @@ class UnityArchiveFile(object):
 
     def read_blocks_and_directory(self, fs: FileStream):
         self.blocks_info.decode(fs)
-        self.print(self.blocks_info.uncompressed_data_hash)
-        self.print(len(self.blocks_info.blocks),vars(self.blocks_info))
         if self.header.has_blocks_and_directory_info_combined:
             self.direcory_info.decode(fs)
             self.print(vars(self.direcory_info))
         self.data_offset = fs.position
-        worst_compression_ratio = 1.0
-        self.uncompressed_blocks_offsets = [0]
-        self.blocks_offsets = [0]
-        for i in range(len(self.blocks_info.blocks)):
-            block = self.blocks_info.blocks[i]
-            self.uncompressed_blocks_offsets.append(0)
-            self.blocks_offsets.append(0)
-            self.uncompressed_blocks_offsets[i + 1] = self.uncompressed_blocks_offsets[i] + block.uncompressed_size
-            self.blocks_offsets[i + 1] = self.blocks_offsets[i] + block.compressed_size
-            if not block.is_streamed and self.minimum_read_buffer_size < block.compressed_size:
-                self.minimum_read_buffer_size = block.compressed_size
-            ratio = 1.0 * block.compressed_size / block.uncompressed_size
-            if worst_compression_ratio > ratio: worst_compression_ratio = ratio
-        self.minimum_read_buffer_size = int(self.minimum_read_buffer_size / worst_compression_ratio)
-        self.print(self.minimum_read_buffer_size, worst_compression_ratio)
 
 class Commands(object):
     dump = 'dump'
@@ -275,6 +256,7 @@ def processs(parameters: Dict[str, any]):
     archive = parameters.get('archive')  # type: UnityArchiveFile
     command = options.command  # type: str
     stream = parameters.get('stream')  # type: FileStream
+    mono_scripts = parameters.get('mono_scripts')  # type: dict[tuple, serialize.ObjectInfo]
 
     if command == Commands.dump:
         serializer.dump(stream)
@@ -292,12 +274,13 @@ def processs(parameters: Dict[str, any]):
                 if not p.exists(export_path): os.makedirs(export_path)
                 stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
                 target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))
-                name = target.get('m_Name')  # type: bytes
-                if not name: name = '{}'.format(o.local_identifier_in_file).encode('utf-8')
+                standardize(target)
+                name = target.get('m_Name')  # type: str
+                if not name: name = '{}'.format(o.local_identifier_in_file)
                 if type_tree.name == 'Texture2D':
                     target['m_TextureFormat'] = TextureFormat(target['m_TextureFormat']).__repr__()
                     target['m_ForcedFallbackFormat'] = TextureFormat(target['m_ForcedFallbackFormat']).__repr__()
-                    data = target['image data'].get('data', b'')
+                    data = target['image data'].get('data', '')
                     if not data:
                         stream_data = target.get('m_StreamData')  # type: dict
                         offset = stream_data.get('offset')
@@ -306,22 +289,51 @@ def processs(parameters: Dict[str, any]):
                         stream.seek(node.offset + offset)
                         data = stream.read(size)
                     extension = 'tex'
-                    with open('{}/{}.json'.format(export_path, name.decode('utf-8')), 'w') as fp:
+                    with open('{}/{}.json'.format(export_path, name), 'w') as fp:
                         del target['image data']
-                        standardize(target)
                         fp.write(json.dumps(target, ensure_ascii=False, indent=4))
                     print(target)
                 elif type_tree.name == 'TextAsset':
                     data = target.get('m_Script')
                     extension = 'bytes'
                 else:
-                    print(vars(o), target)
-                    standardize(target)
-                    data = json.dumps(target, ensure_ascii=False, indent=4).encode('utf-8')
+                    type_name = ''
+                    if type_tree.persistent_type_id == serialize.MONO_BEHAVIOUR_PERSISTENT_ID:
+                        ref = target['m_Script']  # type: dict
+                        entity = ref.get('m_FileID'), ref.get('m_PathID')
+                        if entity not in mono_scripts: entity = 0, ref.get('m_PathID')
+                        if entity in mono_scripts:
+                            script = mono_scripts.get(entity)
+                            type_name = '<{}::\033[4m{}\033[0m,\033[2m{}\033[0m>'.format(script.namespace if script.namespace else 'global', script.type_name, script.assembly)
+                            name = '{}_{}'.format(name, script.type_name)
+                        else:
+                            print('\033[31m{} {} \033[33m{} \033[36m{}\033[0m'.format(entity, o, target, type_tree))
+                    print('\033[33m{}{} \033[36m{}\033[0m'.format(o, type_name, target))
+                    data = json.dumps(target, ensure_ascii=False, indent=4)
                     extension = 'json'
-                with open('{}/{}.{}'.format(export_path, name.decode('utf-8'), extension), 'wb') as fp:
+                with open('{}/{}.{}'.format(export_path, name, extension), 'w') as fp:
                     fp.write(data)
-                    print('  + {}'.format(fp.name))
+                    print('# {}\n'.format(fp.name))
+
+def collect_mono_scripts(serializer, mono_scripts: Dict, stream: FileStream):
+    MONO_SCRIPT_TYPE_ID = -1
+    for n in range(len(serializer.type_trees)):
+        t = serializer.type_trees[n]
+        if t.persistent_type_id == serialize.MONO_SCRIPT_PERSISTENT_ID:
+            MONO_SCRIPT_TYPE_ID = n
+            break
+    if MONO_SCRIPT_TYPE_ID == -1: return
+    type_tree = serializer.type_trees[MONO_SCRIPT_TYPE_ID]
+    for n in range(len(serializer.objects)):
+        o = serializer.objects[n]
+        if o.type_id == MONO_SCRIPT_TYPE_ID:
+            stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
+            script = serializer.deserialize(fs=stream, meta_type=type_tree.type_dict.get(0))
+            o.type_name = script.get('m_ClassName').decode('utf-8')
+            o.namespace = script.get('m_Namespace').decode('utf-8')
+            o.assembly = script.get('m_AssemblyName').decode('utf-8')
+            entity = serializer.node.index, n
+            mono_scripts[entity] = o
 
 def main():
     arguments = argparse.ArgumentParser()
@@ -330,6 +342,7 @@ def main():
     arguments.add_argument('--debug', '-d', action='store_true')
     arguments.add_argument('--types', '-t', nargs='+', type=int)
 
+    mono_scripts = {}
     options = arguments.parse_args(sys.argv[1:])
     for file_path in options.file:
         print('>>>', file_path)
@@ -348,10 +361,12 @@ def main():
                     stream.endian = '>'
                     serializer = serialize.SerializedFile(debug=options.debug, node=node)
                     serializer.decode(stream)
+                    collect_mono_scripts(serializer, mono_scripts, stream)
                     processs(parameters=locals())
         else:
             serializer = serialize.SerializedFile(debug=options.debug, node=node)
             serializer.decode(stream)
+            collect_mono_scripts(serializer, mono_scripts, stream)
             processs(parameters=locals())
 
 

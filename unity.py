@@ -238,7 +238,8 @@ def standardize(data):
     if isinstance(data, dict):
         for key, value in data.items():  # type: str, any
             if isinstance(value, bytes):
-                data[key] = value.hex() if key == 'data' else value.decode('utf-8')
+                try: data[key] = value.hex() if key == 'data' else value.decode('utf-8')
+                except: data[key] = value.hex()
             else: standardize(value)
     elif isinstance(data, list):
         for n in range(len(data)):
@@ -258,6 +259,11 @@ def processs(parameters: Dict[str, any]):
     stream = parameters.get('stream')  # type: FileStream
     mono_scripts = parameters.get('mono_scripts')  # type: dict[tuple, serialize.ObjectInfo]
 
+    def write(__path, __data, mode='w', verbose=True):
+        with open(__path, mode) as __fp:
+            __fp.write(__data)
+            if verbose: print('# {}'.format(__fp.name))
+
     if command == Commands.dump:
         serializer.dump(stream)
     elif command == Commands.type:
@@ -274,13 +280,15 @@ def processs(parameters: Dict[str, any]):
                 if not p.exists(export_path): os.makedirs(export_path)
                 stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
                 target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))
-                standardize(target)
-                name = target.get('m_Name')  # type: str
+
+                name = target.get('m_Name')
                 if not name: name = '{}'.format(o.local_identifier_in_file)
+                else: name = name.decode('utf-8')
+                print('\033[33m{}'.format(o), end=' ')
                 if type_tree.name == 'Texture2D':
                     target['m_TextureFormat'] = TextureFormat(target['m_TextureFormat']).__repr__()
                     target['m_ForcedFallbackFormat'] = TextureFormat(target['m_ForcedFallbackFormat']).__repr__()
-                    data = target['image data'].get('data', '')
+                    data = target['image data'].get('data', b'')  # type: bytes
                     if not data:
                         stream_data = target.get('m_StreamData')  # type: dict
                         offset = stream_data.get('offset')
@@ -288,15 +296,18 @@ def processs(parameters: Dict[str, any]):
                         node = archive.direcory_info.nodes[1]
                         stream.seek(node.offset + offset)
                         data = stream.read(size)
-                    extension = 'tex'
-                    with open('{}/{}.json'.format(export_path, name), 'w') as fp:
-                        del target['image data']
-                        fp.write(json.dumps(target, ensure_ascii=False, indent=4))
-                    print(target)
+                    print('\033[0m')
+                    write('{}/{}.tex'.format(export_path, name), data, mode='wb')
+                    del target['image data']
+                    standardize(target)
+                    write('{}/{}.json'.format(export_path, name), json.dumps(target, ensure_ascii=False, indent=4), mode='w', verbose=False)
+                    print('\033[36m{}'.format(target))
                 elif type_tree.name == 'TextAsset':
                     data = target.get('m_Script')
-                    extension = 'bytes'
+                    print('\033[0m')
+                    write('{}/{}.bytes'.format(export_path, name), data, mode='wb')
                 else:
+                    standardize(target)
                     type_name = ''
                     if type_tree.persistent_type_id == serialize.MONO_BEHAVIOUR_PERSISTENT_ID:
                         ref = target['m_Script']  # type: dict
@@ -307,13 +318,11 @@ def processs(parameters: Dict[str, any]):
                             type_name = '<{}::\033[4m{}\033[0m,\033[2m{}\033[0m>'.format(script.namespace if script.namespace else 'global', script.type_name, script.assembly)
                             name = '{}_{}'.format(name, script.type_name)
                         else:
-                            print('\033[31m[E]{} {} \033[33m{} \033[36m{}\033[0m'.format(entity, o, target, type_tree))
-                    print('\033[33m{}{} \033[36m{}\033[0m'.format(o, type_name, target))
+                            print('\033[31m[E]{} {} \033[33m{}\033[0m'.format(entity, o, target))
+                    print('{} \033[36m{}\033[0m'.format(type_name, target))
                     data = json.dumps(target, ensure_ascii=False, indent=4)
-                    extension = 'json'
-                with open('{}/{}.{}'.format(export_path, name, extension), 'w') as fp:
-                    fp.write(data)
-                    print('# {}\n'.format(fp.name))
+                    write('{}/{}.json'.format(export_path, name), data, mode='w')
+                print()
 
 def collect_mono_scripts(serializer, mono_scripts: Dict, stream: FileStream):
     MONO_SCRIPT_TYPE_ID = -1

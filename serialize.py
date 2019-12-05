@@ -140,9 +140,7 @@ class ObjectInfo(object):
         self.type_id = fs.read_uint32()
 
     def __repr__(self):
-        if not self.type_name:
-            return '{{id={}, type={}}}'.format(self.local_identifier_in_file, self.name)
-        return '{{id={}, type={}, class={}}}'.format(self.local_identifier_in_file, self.name, self.type_name)
+        return '{{id={}, type={}, offset={:,}, size={:,}}}'.format(self.local_identifier_in_file, self.name, self.byte_start, self.byte_size)
 
 class ScriptTypeInfo(object):
     def __init__(self):

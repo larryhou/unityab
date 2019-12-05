@@ -3,12 +3,14 @@
 import argparse
 import enum
 import sys
+import struct
+import io
 
 import lz4.block
 
 from format import TextureFormat
 from stream import FileStream
-from typing import List, Dict
+from typing import List, Dict, BinaryIO
 
 import serialize
 import os, json
@@ -257,7 +259,6 @@ def processs(parameters: Dict[str, any]):
     archive = parameters.get('archive')  # type: UnityArchiveFile
     command = options.command  # type: str
     stream = parameters.get('stream')  # type: FileStream
-    mono_scripts = parameters.get('mono_scripts')  # type: dict[tuple, serialize.ObjectInfo]
 
     def write(__path, __data, mode='w', verbose=True):
         with open(__path, mode) as __fp:
@@ -308,23 +309,22 @@ def processs(parameters: Dict[str, any]):
                     write('{}/{}.bytes'.format(export_path, name), data, mode='wb')
                 else:
                     standardize(target)
-                    type_name = ''
+                    definition = ''
                     if type_tree.persistent_type_id == serialize.MONO_BEHAVIOUR_PERSISTENT_ID:
                         ref = target['m_Script']  # type: dict
-                        entity = ref.get('m_FileID'), ref.get('m_PathID')
-                        if entity not in mono_scripts: entity = 0, ref.get('m_PathID')
+                        entity = ref.get('m_PathID')  # type: int
                         if entity in mono_scripts:
-                            script = mono_scripts.get(entity)
-                            type_name = '<{}::\033[4m{}\033[0m,\033[2m{}\033[0m>'.format(script.namespace if script.namespace else 'global', script.type_name, script.assembly)
-                            name = '{}_{}'.format(o.local_identifier_in_file, script.type_name)
+                            class_name, namespace, assembly = [x.decode('utf-8') for x in mono_scripts.get(entity)]  # type: tuple
+                            definition = '<{}::\033[4m{}\033[0m,\033[2m{}\033[0m>'.format(namespace if namespace else 'global', class_name, assembly)
+                            name = '{}_{}'.format(o.local_identifier_in_file, class_name)
                         else:
                             print('\033[31m[E]{}\033[0m'.format(entity))
-                    print('{} \033[36m{}\033[0m'.format(type_name, target))
+                    print('{} \033[36m{}\033[0m'.format(definition, target))
                     data = json.dumps(target, ensure_ascii=False, indent=4)
                     write('{}/{}.json'.format(export_path, name), data, mode='w')
                 print()
 
-def collect_mono_scripts(serializer, mono_scripts: Dict, stream: FileStream):
+def collect_mono_scripts(serializer, stream: FileStream):
     MONO_SCRIPT_TYPE_ID = -1
     for n in range(len(serializer.type_trees)):
         t = serializer.type_trees[n]
@@ -338,11 +338,18 @@ def collect_mono_scripts(serializer, mono_scripts: Dict, stream: FileStream):
         if o.type_id == MONO_SCRIPT_TYPE_ID:
             stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
             script = serializer.deserialize(fs=stream, meta_type=type_tree.type_dict.get(0))
-            o.type_name = script.get('m_ClassName').decode('utf-8')
-            o.namespace = script.get('m_Namespace').decode('utf-8')
-            o.assembly = script.get('m_AssemblyName').decode('utf-8')
-            entity = serializer.node.index, n
-            mono_scripts[entity] = o
+            o.type_name = script.get('m_ClassName')
+            o.namespace = script.get('m_Namespace')
+            o.assembly = script.get('m_AssemblyName')
+            # encode mono scripts to cache file
+            if o.local_identifier_in_file not in mono_scripts:
+                mono_scripts_stream.write(struct.pack('q', o.local_identifier_in_file))
+                mono_scripts_stream.write(struct.pack('i', len(o.type_name)))
+                mono_scripts_stream.write(o.type_name)
+                mono_scripts_stream.write(struct.pack('i', len(o.namespace)))
+                mono_scripts_stream.write(o.namespace)
+                mono_scripts_stream.write(struct.pack('i', len(o.assembly)))
+                mono_scripts_stream.write(o.assembly)
 
 def main():
     arguments = argparse.ArgumentParser()
@@ -351,7 +358,6 @@ def main():
     arguments.add_argument('--debug', '-d', action='store_true')
     arguments.add_argument('--types', '-t', nargs='+', type=int)
 
-    mono_scripts = {}
     options = arguments.parse_args(sys.argv[1:])
     for file_path in options.file:
         print('>>>', file_path)
@@ -370,14 +376,31 @@ def main():
                     stream.endian = '>'
                     serializer = serialize.SerializedFile(debug=options.debug, node=node)
                     serializer.decode(stream)
-                    collect_mono_scripts(serializer, mono_scripts, stream)
+                    collect_mono_scripts(serializer, stream)
                     processs(parameters=locals())
         else:
             serializer = serialize.SerializedFile(debug=options.debug, node=node)
             serializer.decode(stream)
-            collect_mono_scripts(serializer, mono_scripts, stream)
+            collect_mono_scripts(serializer, stream)
             processs(parameters=locals())
 
+def load_scripts():
+    import os.path as p
+    fp = open(p.join(p.dirname(p.abspath(__file__)), 'mono_scrips.bin'), 'a+b')
+    fp.seek(0, os.SEEK_END)
+    length = fp.tell()
+    fp.seek(0)
+    while fp.tell() < length:
+        identifer, = struct.unpack('q', fp.read(8))
+        values = []
+        for _ in range(3):
+            size, = struct.unpack('i', fp.read(4))
+            values.append(fp.read(size) if size > 0 else b'')
+        mono_scripts[identifer] = tuple(values)
+    assert fp.tell() == length
+    return fp
 
 if __name__ == '__main__':
+    mono_scripts = {}
+    mono_scripts_stream = load_scripts()  # type: BinaryIO
     main()

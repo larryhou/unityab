@@ -27,6 +27,9 @@ class FileStream(object):
             return True
         return False
 
+    def close(self):
+        self.__buffer.close()
+
     @property
     def position(self) -> int:
         return self.__buffer.tell()

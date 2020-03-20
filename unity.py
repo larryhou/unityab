@@ -289,8 +289,10 @@ def processs(parameters: Dict[str, any]):
                 else: name = name.decode('utf-8')
                 print('\033[33m{}'.format(o), end=' ')
                 if type_tree.name == 'Texture2D':
+                    print(target)
                     target['m_TextureFormat'] = TextureFormat(target['m_TextureFormat']).__repr__()
-                    target['m_ForcedFallbackFormat'] = TextureFormat(target['m_ForcedFallbackFormat']).__repr__()
+                    if 'm_ForcedFallbackFormat' in target:
+                        target['m_ForcedFallbackFormat'] = TextureFormat(target['m_ForcedFallbackFormat']).__repr__()
                     data = target['image data'].get('data', b'')  # type: bytes
                     if not data and archive.direcory_info.nodes:
                         stream_data = target.get('m_StreamData')  # type: dict
@@ -324,7 +326,7 @@ def processs(parameters: Dict[str, any]):
                     print('{} \033[36m{}\033[0m'.format(definition, target))
                     data = json.dumps(target, ensure_ascii=False, indent=4)
                     write('{}/{}.json'.format(export_path, name), data, mode='w')
-                print()
+                print('\033[0m')
 
 def collect_mono_scripts(serializer, stream: FileStream):
     MONO_SCRIPT_TYPE_ID = -1

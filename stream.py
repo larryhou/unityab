@@ -16,6 +16,8 @@ class FileStream(object):
         else:
             self.__buffer = io.BytesIO()
         self.endian = '>'
+        self.__read_limit = 0
+        self.__read_count = 0
 
     def fill(self, data: bytes):
         assert data
@@ -50,7 +52,14 @@ class FileStream(object):
     def bytes_available(self):
         return self.length - self.position
 
+    def prelock(self, size):
+        self.__read_limit = size
+        self.__read_count = 0
+
     def read(self, n: int = 1) -> bytes:
+        self.__read_count += n
+        if 0 < self.__read_limit <= self.__read_count:
+            raise Exception('expect {} bytes'.format(self.__read_limit))
         char = self.__buffer.read(n)
         if not char: raise RuntimeError('expect more data')
         return char

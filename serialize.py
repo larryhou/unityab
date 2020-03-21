@@ -256,7 +256,6 @@ class SerializedFile(object):
                             it = self.deserialize(fs, meta_type=type_map.get(element_type.index))
                             items.append(it)
                     array['data'] = items
-                    fs.align()
             elif node.type == 'string':
                 size = fs.read_sint32()
                 result[node.name] = fs.read(size) if size > 0 else b''
@@ -279,6 +278,7 @@ class SerializedFile(object):
                 self.print(vars(type_tree.type_dict.get(0)))
             except: continue
             offset = fs.position
+            fs.prelock(size=o.byte_size)
             data = self.deserialize(fs=fs, meta_type=type_tree.type_dict.get(0))
             assert fs.position - offset == o.byte_size
             self.print(data)

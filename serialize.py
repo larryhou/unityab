@@ -2,7 +2,8 @@ from stream import FileStream
 from typing import List, Dict
 from strings import get_caculate_string
 from unity import FileNode
-import io, uuid
+import io, uuid, os, traceback
+import os.path as p
 
 MONO_BEHAVIOUR_PERSISTENT_ID = 114
 MONO_SCRIPT_PERSISTENT_ID = 115
@@ -25,9 +26,9 @@ class MetadataType(object):
 class MetadataTypeTree(object):
     def __init__(self, type_tree_enabled: bool):
         self.persistent_type_id: int = -1
-        self.is_stripped_type: bool = False
-        self.script_type_index: int = -1
-        self.script_type_hash: bytes = b''
+        self.is_stripped: bool = False
+        self.script_index: int = -1
+        self.mono_hash: bytes = b''
         self.type_hash: bytes = b''
         self.nodes: List[TypeField] = []
         self.strings: Dict[int, str] = {}
@@ -35,7 +36,7 @@ class MetadataTypeTree(object):
         self.type_dict: Dict[int, MetadataType] = {}
         self.name: str = ''
 
-    def __decode_type_tree(self, fs: FileStream):
+    def decode_type_tree(self, fs: FileStream):
         type_index = -1
         node_count = fs.read_uint32()
         char_count = fs.read_uint32()
@@ -59,34 +60,43 @@ class MetadataTypeTree(object):
             node.type = get_caculate_string(offset=node.type_str_offset, strings=self.strings)
         self.name = self.nodes[0].type
 
+    def get_cache_path(self, auto_create=False):
+        type_cache_dir = p.join(p.dirname(p.abspath(__file__)), 'types')
+        filename = '{}'.format(self.persistent_type_id)
+        if self.persistent_type_id == MONO_BEHAVIOUR_PERSISTENT_ID:
+            type_cache_dir = '{}/{}'.format(type_cache_dir, MONO_BEHAVIOUR_PERSISTENT_ID)
+            filename = self.mono_hash.hex()
+        if not p.exists(type_cache_dir) and auto_create:
+            os.makedirs(type_cache_dir)
+        return '{}/{}'.format(type_cache_dir, filename)
+
     def decode(self, fs: FileStream):
         offset = fs.position
         self.persistent_type_id = fs.read_sint32()
-        self.is_stripped_type = fs.read_boolean()
-        self.script_type_index = fs.read_sint16()
+        self.is_stripped = fs.read_boolean()
+        self.script_index = fs.read_sint16()
         if self.persistent_type_id == MONO_BEHAVIOUR_PERSISTENT_ID:
-            self.script_type_hash = fs.read(16)
+            self.mono_hash = fs.read(16)
         self.type_hash = fs.read(16)
+
         self.nodes = []
         self.strings = {}
         if self.type_tree_enabled:
-            self.__decode_type_tree(fs)
+            self.decode_type_tree(fs)
         else:
-            import os.path as p
-            type_data_path = p.join(p.dirname(p.abspath(__file__)), 'types')
-            type_data_file = '{}/{}_{}.type'.format(type_data_path, self.persistent_type_id, self.type_hash.hex())
-            if p.exists(type_data_file):
-                tmp = FileStream(file_path=type_data_file)
+            cache_path = self.get_cache_path()
+            if p.exists(cache_path):
+                tmp = FileStream(file_path=cache_path)
                 tmp.endian = '<'
                 persistent_type_id = tmp.read_sint32()
                 assert persistent_type_id == self.persistent_type_id, '{} != {}'.format(persistent_type_id, self.persistent_type_id)
                 tmp.seek(fs.position - offset)
-                self.__decode_type_tree(fs=tmp)
+                self.decode_type_tree(fs=tmp)
 
     def __repr__(self):
         buf = io.StringIO()
-        buf.write('[MetadataTypeTree] persistent_type_id={} is_stripped_type={} script_type_index={} type_hash={}'.format(self.persistent_type_id, self.is_stripped_type, self.script_type_index, uuid.UUID(bytes=self.type_hash)))
-        if self.persistent_type_id == MONO_BEHAVIOUR_PERSISTENT_ID: buf.write(' mono_hash={}'.format(uuid.UUID(bytes=self.script_type_hash)))
+        buf.write('[MetadataTypeTree] persistent_type_id={} is_stripped_type={} script_type_index={} type_hash={}'.format(self.persistent_type_id, self.is_stripped, self.script_index, uuid.UUID(bytes=self.type_hash)))
+        if self.persistent_type_id == MONO_BEHAVIOUR_PERSISTENT_ID: buf.write(' mono_hash={}'.format(uuid.UUID(bytes=self.mono_hash)))
         buf.write('\n')
         for node in self.nodes:
             buf.write(node.level * '    ')
@@ -255,6 +265,7 @@ class SerializedFile(object):
                         for m in range(element_count):
                             it = self.deserialize(fs, meta_type=type_map.get(element_type.index))
                             items.append(it)
+                        fs.align()
                     array['data'] = items
             elif node.type == 'string':
                 size = fs.read_sint32()
@@ -265,7 +276,6 @@ class SerializedFile(object):
                 if node.meta_flags & 0x4000 != 0: fs.align()
             elif node.byte_size == 0: continue
             else:
-                # print('-', vars(node))
                 result[node.name] = self.deserialize(fs, meta_type=type_map.get(node.index))
         return result
 
@@ -278,11 +288,13 @@ class SerializedFile(object):
                 self.print(vars(type_tree.type_dict.get(0)))
             except: continue
             offset = fs.position
-            fs.prelock(size=o.byte_size)
-            data = self.deserialize(fs=fs, meta_type=type_tree.type_dict.get(0))
-            assert fs.position - offset == o.byte_size
-            self.print(data)
-            self.print()
+            try:
+                data = self.deserialize(fs=fs, meta_type=type_tree.type_dict.get(0))
+                assert fs.position - offset == o.byte_size
+                self.print(data)
+                self.print()
+            except:
+                traceback.print_exc()
         self.print('position={} remain={}'.format(fs.position, fs.bytes_available))
 
     def decode(self, fs:FileStream):
@@ -312,7 +324,7 @@ class SerializedFile(object):
                 position = fs.position
                 fs.seek(offset)
                 type_data = fs.read(position - offset)
-                with open('types/{}_{}.type'.format(type_tree.persistent_type_id, type_tree.type_hash.hex()), 'wb') as fp:
+                with open(type_tree.get_cache_path(auto_create=True), 'wb') as fp:
                     fp.write(type_data)
             self.type_trees.append(type_tree)
             self.register_type_tree(type_tree=type_tree)

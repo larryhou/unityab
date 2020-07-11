@@ -261,6 +261,8 @@ def processs(parameters: Dict[str, any]):
     stream = parameters.get('stream')  # type: FileStream
 
     def write(__path, __data, mode='w', verbose=True):
+        output = p.dirname(__path)
+        if not p.exists(output): os.makedirs(output)
         with open(__path, mode) as __fp:
             __fp.write(__data)
             if verbose: print('# {}'.format(__fp.name))
@@ -270,7 +272,7 @@ def processs(parameters: Dict[str, any]):
     elif command == Commands.type:
         import uuid
         for type_tree in serializer.type_trees:
-            print('{:3d} \033[33m{} \033[36m{} \033[32m{}\033[0m'.format(type_tree.persistent_type_id, type_tree.nodes[0].type, uuid.UUID(bytes=type_tree.type_hash), type_tree.script_type_index))
+            print('{:3d} \033[33m{} \033[36m{} \033[32m{}\033[0m'.format(type_tree.persistent_type_id, type_tree.nodes[0].type, uuid.UUID(bytes=type_tree.type_hash), type_tree.script_index))
     elif command == Commands.save:
         file_name = p.basename(parameters.get('file_path'))
         file_name = file_name[:file_name.rfind('.')]

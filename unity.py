@@ -4,7 +4,7 @@ import argparse
 import enum
 import sys
 import struct
-import io
+import io, traceback
 
 import lz4.block
 
@@ -186,8 +186,8 @@ class UnityArchiveFile(object):
         fs = FileStream()
         fs.open(file_path)
         self.header.decode(fs)
-        self.print(vars(self.header))
         blocks_info_offset = self.header.get_blocks_info_offset()
+        self.print(vars(self.header), blocks_info_offset, fs.position, self.header.compression_type)
         fs.seek(blocks_info_offset)
         compression_type = self.header.compression_type
         if compression_type != CompressionType.NONE:
@@ -285,7 +285,15 @@ def processs(parameters: Dict[str, any]):
             if not options.types or type_tree.persistent_type_id in options.types:
                 if not p.exists(export_path): os.makedirs(export_path)
                 stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
-                target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))
+                stream.lock(size=o.byte_size)
+                # print(vars(o))
+                # print(type_tree)
+                try:
+                    target = serializer.deserialize(stream, meta_type=type_tree.type_dict.get(0))
+                except Exception:
+                    traceback.print_exc()
+                    continue
+                stream.unlock()
                 name = target.get('m_Name')
                 if not name: name = '{}_{}'.format(o.local_identifier_in_file, type_tree.name)
                 else: name = name.decode('utf-8')

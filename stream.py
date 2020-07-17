@@ -52,9 +52,12 @@ class FileStream(object):
     def bytes_available(self):
         return self.length - self.position
 
-    def prelock(self, size):
-        self.__read_limit = size
+    def lock(self, size):
+        self.__read_limit = size + 4
         self.__read_count = 0
+
+    def unlock(self):
+        self.__read_limit = 0
 
     def read(self, n: int = 1) -> bytes:
         self.__read_count += n

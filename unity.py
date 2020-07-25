@@ -11,11 +11,24 @@ import lz4.block
 from format import TextureFormat
 from stream import FileStream
 from typing import List, Dict, BinaryIO
+import lxml.etree as etree
 
 import serialize
 import os, json
 
 UINT64_MAX = (1 << 64) - 1
+
+def u2s(v): # type: (str)->str
+    return v.encode('utf-8') if not isinstance(v, str) else v
+
+def s2u(v): # type: (str)->str
+    return v.decode('utf-8') if isinstance(v, bytes) else v
+
+def b2s(v): # type: (bytes)->str
+    return v if isinstance(v, str) else v.decode('utf-8')
+
+def s2b(v): # type: (str)->bytes
+    return v if isinstance(v, bytes) else v.encode('utf-8')
 
 class CompressionType(enum.IntEnum):
     NONE, LZMA, LZ4, LZ4HC, LZHAM = range(5)
@@ -240,14 +253,14 @@ def standardize(data):
     if isinstance(data, dict):
         for key, value in data.items():  # type: str, any
             if isinstance(value, bytes):
-                try: data[key] = value.hex() if key == 'data' else value.decode('utf-8')
+                try: data[key] = value.hex() if key == 'data' else b2s(value)
                 except: data[key] = value.hex()
             else: standardize(value)
     elif isinstance(data, list):
         for n in range(len(data)):
             item = data[n]
             if isinstance(item, bytes):
-                try: data[n] = item.decode('utf-8')
+                try: data[n] = b2s(item)
                 except: data[n] = item.hex()
             else:
                 standardize(item)
@@ -276,12 +289,16 @@ def processs(parameters: Dict[str, any]):
     elif command == Commands.save:
         file_name = p.basename(parameters.get('file_path'))
         file_name = file_name[:file_name.rfind('.')]
+        objects = {}  # type: dict[int, tuple]
+        hierarchy = {}  # type: dict[int, list]
+        prefabs = []  # type: list[tuple]
+        workspace = p.join('__export/{}/{}'.format(file_name, serializer.node.path))
         for o in serializer.objects:
             type_tree = serializer.type_trees[o.type_id]
             if not type_tree.type_dict:
                 print('\033[31m[E][INCOMPLETE_TYPE_TREE] \033[33m{}\033[0m'.format(type_tree))
                 continue
-            export_path = p.join('__export/{}/{}/{}'.format(file_name, serializer.node.path, type_tree.name))
+            export_path = p.join('{}/{}'.format(workspace, type_tree.name))
             if not options.types or type_tree.persistent_type_id in options.types:
                 if not p.exists(export_path): os.makedirs(export_path)
                 stream.seek(serializer.node.offset + serializer.header.data_offset + o.byte_start)
@@ -294,10 +311,24 @@ def processs(parameters: Dict[str, any]):
                     traceback.print_exc()
                     continue
                 stream.unlock()
-                name = target.get('m_Name')
-                if not name: name = '{}_{}'.format(o.local_identifier_in_file, type_tree.name)
-                else: name = name.decode('utf-8')
+                name = repr(o.local_identifier_in_file)
+                # if not name: name = '{}_{}'.format(o.local_identifier_in_file, type_tree.name)
+                # else: name = name.decode('utf-8')
                 print('\033[33m{}'.format(o), end=' ')
+                if type_tree.persistent_type_id == 1:
+                    components = target['m_Component']['Array']  # type: dict
+                    objects[o.local_identifier_in_file] = target['m_Name'], [] if components['size'] == 0 else [x['component']['m_PathID'] for x in components['data']]
+                else:
+                    objects[o.local_identifier_in_file] = type_tree.name,
+                if type_tree.persistent_type_id == 4:
+                    father = target['m_Father']['m_PathID']
+                    item = o.local_identifier_in_file, target['m_GameObject']['m_PathID']
+                    if father != 0:
+                        if father not in hierarchy: hierarchy[father] = []
+                        hierarchy[father].append(item)
+                    else:
+                        prefabs.append(item)
+
                 if type_tree.name == 'Texture2D':
                     print(target)
                     target['m_TextureFormat'] = TextureFormat(target['m_TextureFormat']).__repr__()
@@ -328,15 +359,48 @@ def processs(parameters: Dict[str, any]):
                         ptr = target.get('m_Script')  # type: dict
                         entity = ptr.get('m_PathID')  # type: int
                         if entity in mono_scripts:
-                            class_name, namespace, assembly = [x.decode('utf-8') for x in mono_scripts.get(entity)]  # type: tuple
+                            class_name, namespace, assembly = [b2s(x) for x in mono_scripts.get(entity)]  # type: tuple
                             definition = '<{}::\033[4m{}\033[0m,\033[2m{}\033[0m>'.format(namespace if namespace else 'global', class_name, assembly)
                             name = '{}_{}'.format(o.local_identifier_in_file, class_name)
+                            objects[o.local_identifier_in_file] = class_name,
                         else:
                             print('\033[31m[E]{}\033[0m'.format(entity))
                     print('{} \033[36m{}\033[0m'.format(definition, target))
                     data = json.dumps(target, ensure_ascii=False, indent=4)
                     write('{}/{}.json'.format(export_path, name), data, mode='w')
                 print('\033[0m')
+        prefab_output = p.join(workspace, 'Prefabs')
+        if not p.exists(prefab_output): os.makedirs(prefab_output)
+        for identifer, go in prefabs:
+            prefab = dump_prefab((identifer, go), objects, hierarchy)
+            name, _ = objects[go]
+            with open('{}/{}_{}.xml'.format(prefab_output, b2s(name), go), 'wb') as fp:
+                content = etree.tostring(prefab, encoding='utf-8', pretty_print=True)
+                fp.write(content)
+                print('>> {}'.format(p.abspath(fp.name)))
+
+
+def dump_prefab(entity, objects, hierarchy):
+    identifier, go = entity
+    node = etree.Element('GameObject')
+    name, components = objects[go]
+    node.set('name', s2u(name))
+    node.set('id', repr(go))
+    nodeComponents = etree.Element('Components')
+    for cid in components:
+        name, = objects[cid]
+        c = etree.Element(s2u(name))
+        c.set('id', repr(cid))
+        nodeComponents.append(c)
+    node.append(nodeComponents)
+    children = hierarchy.get(identifier)
+    if children:
+        length = len(children)
+        for n in range(length):
+            identifier, go = children[n]
+            child = dump_prefab((identifier, go), objects, hierarchy)
+            node.append(child)
+    return node
 
 def collect_mono_scripts(serializer, stream: FileStream):
     MONO_SCRIPT_TYPE_ID = -1
@@ -378,7 +442,7 @@ def main():
         mono_script_keys = list(mono_scripts.keys())
         mono_script_keys.sort()
         for identifier in mono_script_keys:
-            class_name, namespace, assembly = [x.decode('utf-8') for x in mono_scripts.get(identifier)]
+            class_name, namespace, assembly = [b2s(x) for x in mono_scripts.get(identifier)]
             print('\033[36m{} \033[33m{}::\033[4m{}\033[0m \033[2m{}\033[0m'.format(identifier, namespace if namespace else 'global', class_name, assembly))
 
     for file_path in options.file:
